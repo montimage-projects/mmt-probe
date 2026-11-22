@@ -15,3 +15,11 @@ test-stix:
 		$(STIX_TEST_DIR)/test_stix_format.c $(SRC_DIR)/modules/output_format/stix_format.c -luuid
 	@echo "[TEST] $(notdir $(STIX_TEST_BIN))"
 	$(QUIET) $(STIX_TEST_BIN)
+
+# Exit-status regression (issue #2): an offline crash must exit 128+signum,
+# clean shutdowns (end of pcap, SIGINT, SIGTERM) must exit 0. Needs the
+# compiled probe binary — run `make ... compile` first.
+.PHONY: test-crash
+test-crash:
+	@echo "[TEST] crash exit status"
+	$(QUIET) sh $(TOP_DIR)/test/crash_exit_status.sh

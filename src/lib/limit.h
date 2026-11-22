@@ -216,5 +216,11 @@
  * This is helpful to update some parameters, or when facing some errors.
  */
 #define EXIT_TOBE_RESTARTED()  _EXIT( EXIT_FAILURE )
+/**
+ * Exit the current process with the conventional status of a process killed by
+ * the given signal: 128 + signal number. In offline mode there is no monitor
+ * process to restart the probe, so a crash must be visible in the exit status.
+ */
+#define EXIT_BY_SIGNAL( sig )  _EXIT( 128 + (sig) )
 
 #endif /* SRC_LIB_LIMIT_H_ */
