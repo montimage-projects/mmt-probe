@@ -46,6 +46,15 @@ test-snaplen-asan: clean
 	$(QUIET) status=0; $(SNAPLEN_TEST_DIR)/check_snaplen.sh $(TOP_DIR)/probe-asan || status=$$?; \
 		$(MAKE) -s clean; $(RM) $(TOP_DIR)/probe-asan; exit $$status
 
+# Exit-status regression (issue #2): an offline crash must die by the
+# signal (a shell reports 128+signum), clean shutdowns (end of pcap,
+# SIGINT, SIGTERM) must exit 0. Needs the compiled probe binary — run
+# `make ... compile` first.
+.PHONY: test-crash
+test-crash:
+	@echo "[TEST] crash exit status"
+	$(QUIET) sh $(TOP_DIR)/test/crash_exit_status.sh
+
 .PHONY: test
-test: test-stix test-snaplen
+test: test-stix test-snaplen test-crash
 	@:
