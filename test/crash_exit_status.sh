@@ -151,8 +151,17 @@ for spec in "INT 0" "TERM 0" "SEGV 139" "ABRT 134" "BUS 135" "FPE 136" "ILL 132"
 		wait "$WRAPPER_PID" 2>/dev/null
 		continue
 	fi
-	# wait for the probe, with a watchdog that kills it after 10 s
-	( sleep 10; kill -9 "$probe_pid" 2>/dev/null; kill -9 "$WRAPPER_PID" 2>/dev/null ) &
+	# wait for the probe, with a watchdog that kills it after 10 s; the
+	# watchdog's TERM trap kills its own sleep so the parent's kill leaves
+	# no orphan behind
+	(
+		sleep_pid=
+		trap '[ -n "$sleep_pid" ] && kill "$sleep_pid" 2>/dev/null; exit 1' TERM
+		sleep 10 & sleep_pid=$!
+		wait "$sleep_pid" 2>/dev/null
+		kill -9 "$probe_pid" 2>/dev/null
+		kill -9 "$WRAPPER_PID" 2>/dev/null
+	) &
 	wd=$!
 	wait "$WRAPPER_PID"
 	rc=$?
