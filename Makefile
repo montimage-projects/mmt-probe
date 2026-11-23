@@ -123,6 +123,11 @@ $(MMT_DPI_DIR):
 CFLAGS += $(MODULE_FLAGS)
 LIBS   += $(MODULE_LIBS)
 
+#optional user-supplied flags, e.g.,
+#  make compile EXTRA_CFLAGS="-fsanitize=address" EXTRA_LDFLAGS="-fsanitize=address"
+CFLAGS   += $(EXTRA_CFLAGS)
+CLDFLAGS += $(EXTRA_LDFLAGS)
+
 # main source file
 MAIN_SRCS := $(SRC_DIR)/main.c
 
