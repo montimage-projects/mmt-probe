@@ -48,8 +48,8 @@ test-snaplen-asan: clean
 
 # Exit-status regression (issue #2): an offline crash must die by the
 # signal (a shell reports 128+signum), clean shutdowns (end of pcap,
-# SIGINT, SIGTERM) must exit 0. Needs the compiled probe binary — run
-# `make ... compile` first.
+# SIGINT, SIGTERM) must exit 0. The compile prerequisite keeps a
+# parallel `make -j test` on a clean tree from racing the build.
 .PHONY: test-crash
 test-crash: compile
 	@echo "[TEST] crash exit status"
