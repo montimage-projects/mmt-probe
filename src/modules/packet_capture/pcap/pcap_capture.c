@@ -451,7 +451,7 @@ void pcap_capture_start( probe_context_t *context ){
 					context->config->input->input_source,
 					errbuf);
 
-		//set IP packet size; snap-len = 0 means the libpcap maximal length
+		//set IP packet size; snap-len = 0 means PCAP_SNAP_LEN_MAX (65535)
 		if( snap_len == 0 )
 			snap_len = PCAP_SNAP_LEN_MAX;
 		log_write( LOG_DEBUG, "Set snap-len for pcap capture: %"PRIu32, snap_len);
