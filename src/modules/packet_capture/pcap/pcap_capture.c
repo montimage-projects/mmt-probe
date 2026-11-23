@@ -25,6 +25,12 @@
 //the maximal snapshot length libpcap can return;
 // the same value tcpdump uses for "-s 0"
 #define PCAP_SNAP_LEN_MAX 65535
+//the maximal snap length honoured from a savefile's header:
+// libpcap's own maximum (MAXIMUM_SNAPLEN in pcap-int.h, what
+// tcpdump's "-s 0" resolves to). The declared value is untrusted,
+// file-controlled data, so it never sizes the workers' rings beyond
+// this ceiling
+#define PCAP_FILE_SNAP_LEN_MAX 262144
 
 #include "pcap_capture.h"
 #include <tcpip/mmt_tcpip.h>
@@ -429,8 +435,15 @@ void pcap_capture_start( probe_context_t *context ){
 		const int file_snap_len = pcap_snapshot( pcap );
 		if( file_snap_len > 0 && ( snap_len == 0 || snap_len > (uint32_t) file_snap_len ))
 			snap_len = file_snap_len;
+		//the declared snap length is file-controlled data: never let it
+		// size the rings beyond libpcap's own maximum. A bigger declared
+		// value stays correct as the packet copy is clamped to snap_len
+		if( snap_len > PCAP_FILE_SNAP_LEN_MAX )
+			snap_len = PCAP_FILE_SNAP_LEN_MAX;
 		if( snap_len == 0 )
 			snap_len = PCAP_SNAP_LEN_MAX;
+		log_write( LOG_INFO, "Using snap length %"PRIu32" for file '%s' (declared: %d)",
+				snap_len, context->config->input->input_source, file_snap_len );
 	}else{
 		/* open capture device */
 		pcap = pcap_create(context->config->input->input_source, errbuf);

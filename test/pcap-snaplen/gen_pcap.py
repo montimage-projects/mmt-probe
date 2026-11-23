@@ -7,9 +7,11 @@ the packets are spread over ``flows`` distinct 5-tuples so that the probe's
 SMP hash dispatches them to more than one worker.
 
 The snap length written in the file header is the frame size itself: the
-tightest bound a well-formed capture can declare.
+tightest bound a well-formed capture can declare. ``snap_len`` overrides
+it, e.g. to write a header declaring a huge snap length while the frames
+stay small.
 
-Usage: gen_pcap.py OUT FRAME_BYTES PACKETS [FLOWS]
+Usage: gen_pcap.py OUT FRAME_BYTES PACKETS [FLOWS] [SNAP_LEN]
 """
 
 import struct
@@ -49,10 +51,13 @@ def _frame(i: int, size: int, flows: int) -> bytes:
 def main() -> None:
     out, frame_size, packets = sys.argv[1], int(sys.argv[2]), int(sys.argv[3])
     flows = int(sys.argv[4]) if len(sys.argv) > 4 else 64
+    snap_len = int(sys.argv[5]) if len(sys.argv) > 5 else frame_size
     if frame_size < 50:
         raise ValueError("frame size must fit Ethernet+IPv4+UDP+seqno (50 B)")
+    if snap_len < frame_size:
+        raise ValueError("snap length must cover a whole frame")
     with open(out, "wb") as f:
-        f.write(struct.pack("<IHHiIII", 0xA1B2C3D4, 2, 4, 0, 0, frame_size, 1))
+        f.write(struct.pack("<IHHiIII", 0xA1B2C3D4, 2, 4, 0, 0, snap_len, 1))
         for i in range(packets):
             frame = _frame(i, frame_size, flows)
             usec = i * 10
