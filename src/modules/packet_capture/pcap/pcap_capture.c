@@ -22,6 +22,15 @@
 #include "data_spsc_ring.h"
 
 #define BREAK_PCAP_NUMBER 0
+//the maximal snapshot length libpcap can return;
+// the same value tcpdump uses for "-s 0"
+#define PCAP_SNAP_LEN_MAX 65535
+//the maximal snap length honoured from a savefile's header:
+// libpcap's own maximum (MAXIMUM_SNAPLEN in pcap-int.h, what
+// tcpdump's "-s 0" resolves to). The declared value is untrusted,
+// file-controlled data, so it never sizes the workers' rings beyond
+// this ceiling
+#define PCAP_FILE_SNAP_LEN_MAX 262144
 
 #include "pcap_capture.h"
 #include <tcpip/mmt_tcpip.h>
@@ -35,6 +44,9 @@ struct pcap_worker_context_struct{
 //for all application
 struct pcap_probe_context_struct{
 	pcap_t *handler;
+	//max number of bytes of packet data fitting in one element of the workers' rings
+	// (each element is: sizeof( pkthdr_t ) + snap_len)
+	uint32_t snap_len;
 };
 
 
@@ -215,14 +227,22 @@ static inline void _got_a_packet_smp( u_char* user, const struct pcap_pkthdr *pc
 	//get available space to put the packet into
 	data_spsc_ring_get_tmp_element( &worker_context->pcap->fifo,  (void**) &pkt_header );
 
+	//an element of the ring can contain at most snap_len bytes of packet data:
+	// never copy past it when a captured packet is bigger,
+	// e.g., a savefile whose caplen exceeds the configured snap-len
+	uint32_t caplen = pcap_header->caplen;
+	const uint32_t snap_len = context->modules.pcap->snap_len;
+	if( unlikely( caplen > snap_len ))
+		caplen = snap_len;
+
 	/* fill smp_pkt fields and copy packet data from pcap buffer */
 	pkt_header->len       = pcap_header->len;
-	pkt_header->caplen    = pcap_header->caplen;
+	pkt_header->caplen    = caplen;
 	pkt_header->ts        = pcap_header->ts;
 	pkt_header->user_args = NULL;
 	//put data in the same memory segment but after sizeof( pkt )
 	void *pkt_data    =  pkt_header + 1;
-	memcpy( pkt_data, pcap_data, pcap_header->caplen );
+	memcpy( pkt_data, pcap_data, caplen );
 
 	//queue is full??
 	while(  unlikely( data_spsc_ring_push_tmp_element( &worker_context->pcap->fifo ) != QUEUE_SUCCESS )){
@@ -400,54 +420,30 @@ void pcap_capture_start( probe_context_t *context ){
 	//memory for the pcap module
 	context->modules.pcap = mmt_alloc_and_init_zero( sizeof( struct pcap_probe_context_struct ));
 
-	//allocate context for each thread
-	context->smp = mmt_alloc_and_init_zero( sizeof( worker_context_t ) * workers_count );
-
-	//allocate and initialize memory for each worker
-	for( i=0; i<workers_count; i++ ){
-		context->smp[i] = worker_alloc_init( context->config->stack_type );
-		//when there is only one thread (no SMP mode)
-		// => reuse the same output of the main program
-		if( !IS_SMP_MODE( context ))
-			context->smp[i]->output = context->output;
-
-		context->smp[i]->index = i;
-
-		//keep a reference to its root
-		context->smp[i]->probe_context = context;
-
-
-		//specific for pcap module
-		context->smp[i]->pcap = mmt_alloc_and_init_zero( sizeof( struct pcap_worker_context_struct ));
-
-		//pthread_spin_init( & context->smp[i]->pcap->spin_lock, PTHREAD_PROCESS_PRIVATE);
-
-		//initialize in case of multi-threading
-		if( IS_SMP_MODE( context ) ){
-			//a spsc buffer shared between a worker and the main thread
-			if( data_spsc_ring_init( &context->smp[i]->pcap->fifo,
-					context->config->thread->thread_queue_packet_threshold,
-					//one element to contains packet: header + data
-					(sizeof( pkthdr_t ) + context->config->input->snap_len)
-			)){
-
-				ABORT( "Cannot allocate FIFO buffer for thread %d. Please reduce thread-queue or thread-nb",
-						i);
-			}
-
-			//start worker thread
-			pthread_create( &context->smp[i]->pcap->thread_handler, NULL,
-					_worker_thread, context->smp[i] );
-		}
-		else
-			//when there is only one worker running on the main thread
-			worker_on_start( context->smp[0] );
-	}
+	//open the pcap source before creating the workers' rings as
+	// its snap length decides the data size of the rings' elements
+	uint32_t snap_len = context->config->input->snap_len;
 
 	if( context->config->input->input_mode == OFFLINE_ANALYSIS ){
 		pcap = pcap_open_offline( context->config->input->input_source, errbuf );
 		ASSERT( pcap != NULL,
 				"Couldn't open file %s\n", errbuf);
+
+		//a savefile does not contain a packet bigger than its snap length:
+		// bound the ring elements by the smaller of the configured snap-len
+		// and the file's snap length (snap-len = 0 means the file's one)
+		const int file_snap_len = pcap_snapshot( pcap );
+		if( file_snap_len > 0 && ( snap_len == 0 || snap_len > (uint32_t) file_snap_len ))
+			snap_len = file_snap_len;
+		//the declared snap length is file-controlled data: never let it
+		// size the rings beyond libpcap's own maximum. A bigger declared
+		// value stays correct as the packet copy is clamped to snap_len
+		if( snap_len > PCAP_FILE_SNAP_LEN_MAX )
+			snap_len = PCAP_FILE_SNAP_LEN_MAX;
+		if( snap_len == 0 )
+			snap_len = PCAP_SNAP_LEN_MAX;
+		log_write( LOG_INFO, "Using snap length %"PRIu32" for file '%s' (declared: %d)",
+				snap_len, context->config->input->input_source, file_snap_len );
 	}else{
 		/* open capture device */
 		pcap = pcap_create(context->config->input->input_source, errbuf);
@@ -456,13 +452,14 @@ void pcap_capture_start( probe_context_t *context ){
 					context->config->input->input_source,
 					errbuf);
 
-		//set IP packet size
-		if( context->config->input->snap_len ){
-			log_write( LOG_DEBUG, "Set snap-len for pcap capture: %"PRIu16, context->config->input->snap_len);
-			ret = pcap_set_snaplen( pcap, context->config->input->snap_len );
-			ASSERT( ret == 0,
-				"Cannot set snaplen for pcap capture: %d", context->config->input->snap_len );
-		}
+		//set IP packet size; snap-len = 0 means the libpcap maximal length
+		if( snap_len == 0 )
+			snap_len = PCAP_SNAP_LEN_MAX;
+		log_write( LOG_DEBUG, "Set snap-len for pcap capture: %"PRIu32, snap_len);
+		ret = pcap_set_snaplen( pcap, snap_len );
+		ASSERT( ret == 0,
+			"Cannot set snaplen for pcap capture: %"PRIu32, snap_len );
+
 		//put NIC to promiscuous mode to capture any packets
 		ret = pcap_set_promisc( pcap, 1);
 		ASSERT( ret == 0 ,
@@ -500,6 +497,54 @@ void pcap_capture_start( probe_context_t *context ){
 					context->config->stack_type);
 	}
 
+	//the snap length in use: capacity of the data part of each ring element
+	context->modules.pcap->snap_len = snap_len;
+	context->modules.pcap->handler  = pcap;
+
+	//allocate context for each thread
+	context->smp = mmt_alloc_and_init_zero( sizeof( worker_context_t ) * workers_count );
+
+	//allocate and initialize memory for each worker
+	for( i=0; i<workers_count; i++ ){
+		context->smp[i] = worker_alloc_init( context->config->stack_type );
+		//when there is only one thread (no SMP mode)
+		// => reuse the same output of the main program
+		if( !IS_SMP_MODE( context ))
+			context->smp[i]->output = context->output;
+
+		context->smp[i]->index = i;
+
+		//keep a reference to its root
+		context->smp[i]->probe_context = context;
+
+
+		//specific for pcap module
+		context->smp[i]->pcap = mmt_alloc_and_init_zero( sizeof( struct pcap_worker_context_struct ));
+
+		//pthread_spin_init( & context->smp[i]->pcap->spin_lock, PTHREAD_PROCESS_PRIVATE);
+
+		//initialize in case of multi-threading
+		if( IS_SMP_MODE( context ) ){
+			//a spsc buffer shared between a worker and the main thread
+			if( data_spsc_ring_init( &context->smp[i]->pcap->fifo,
+					context->config->thread->thread_queue_packet_threshold,
+					//one element to contains packet: header + data
+					(sizeof( pkthdr_t ) + context->modules.pcap->snap_len)
+			)){
+
+				ABORT( "Cannot allocate FIFO buffer for thread %d. Please reduce thread-queue or thread-nb",
+						i);
+			}
+
+			//start worker thread
+			pthread_create( &context->smp[i]->pcap->thread_handler, NULL,
+					_worker_thread, context->smp[i] );
+		}
+		else
+			//when there is only one worker running on the main thread
+			worker_on_start( context->smp[0] );
+	}
+
 	// Compile and set the filter
 	struct bpf_program fp;
 	const char *pcap_filter = context->config->input->pcap_filter;
@@ -513,8 +558,6 @@ void pcap_capture_start( probe_context_t *context ){
 		ASSERT( ret == 0,
 			"Couldn't install filter '%s': %s\n", pcap_filter, pcap_geterr(pcap));
 	}
-
-	context->modules.pcap->handler = pcap;
 
 	ret = 0;
 	//set in non-blocking mode in case of no threading
