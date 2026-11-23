@@ -30,7 +30,8 @@
 #   WORKDIR  scratch dir for the captures, config and logs
 #            (default: a new mktemp -d, removed on exit)
 # Overrides via env: PACKETS, FLOWS, THREAD_QUEUE, RUN_TIMEOUT,
-#                    SNAP_LENS, THREAD_NBS, MEM_LIMIT_KB, SNAP_CAP.
+#                    SNAP_LENS, THREAD_NBS, MEM_LIMIT_KB, SNAP_CAP,
+#                    HUGE_SNAP_DECLARED.
 
 set -u
 
