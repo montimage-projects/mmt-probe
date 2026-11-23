@@ -51,7 +51,7 @@ test-snaplen-asan: clean
 # SIGINT, SIGTERM) must exit 0. Needs the compiled probe binary — run
 # `make ... compile` first.
 .PHONY: test-crash
-test-crash:
+test-crash: compile
 	@echo "[TEST] crash exit status"
 	$(QUIET) sh $(TOP_DIR)/test/crash_exit_status.sh
 

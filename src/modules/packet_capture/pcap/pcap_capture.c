@@ -22,8 +22,7 @@
 #include "data_spsc_ring.h"
 
 #define BREAK_PCAP_NUMBER 0
-//the maximal snapshot length libpcap can return;
-// the same value tcpdump uses for "-s 0"
+//the snap length used online when snap-len = 0 (the documented default in mmt-probe.conf); libpcap >= 1.10 itself allows up to 262144
 #define PCAP_SNAP_LEN_MAX 65535
 //the maximal snap length honoured from a savefile's header:
 // libpcap's own maximum (MAXIMUM_SNAPLEN in pcap-int.h, what

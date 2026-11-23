@@ -458,6 +458,15 @@ bool _init_protocol_stack(uint32_t stack_type, uint32_t stack_offset ){
  * @return
  */
 static int _main_processing( int argc, char** argv ){
+	//resolve the backtrace machinery now, before any signal handler is
+	// installed: the first backtrace() call lazily loads libgcc_s (dlopen +
+	// malloc, not async-signal-safe) — inside a crash handler that could
+	// deadlock or fault before the process dies by the signal
+	{
+		void *frames[ 1 ];
+		(void) backtrace( frames, 1 );
+	}
+
 	//must not handle SIGUSR1 as it is used by mmt_bus
 	signal(SIGINT,  signal_handler);
 	signal(SIGTERM, signal_handler);
@@ -467,15 +476,6 @@ static int _main_processing( int argc, char** argv ){
 	signal(SIGILL,  signal_handler);
 	signal(SIGABRT, signal_handler);
 	signal(SIGRES,  signal_handler);
-
-	//resolve the backtrace machinery now, outside of any signal handler:
-	// the first backtrace() call lazily loads libgcc_s (dlopen + malloc,
-	// not async-signal-safe) — inside a crash handler that could deadlock
-	// or fault before the process dies by the signal
-	{
-		void *frames[ 1 ];
-		(void) backtrace( frames, 1 );
-	}
 
 	int ret = 0;
 
