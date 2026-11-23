@@ -217,10 +217,23 @@
  */
 #define EXIT_TOBE_RESTARTED()  _EXIT( EXIT_FAILURE )
 /**
- * Exit the current process with the conventional status of a process killed by
- * the given signal: 128 + signal number. In offline mode there is no monitor
- * process to restart the probe, so a crash must be visible in the exit status.
+ * Terminate the current process as if it had been killed by the given signal:
+ * restore the default disposition, unblock the signal (it is masked while its
+ * handler is running) and re-raise it, so a consumer sees a real signal death
+ * (WIFSIGNALED from waitpid; a shell reports it as 128 + signal number)
+ * rather than a normal exit. In offline mode there is no monitor process to
+ * restart the probe, so a crash must be visible in the exit status.
+ * _exit() is the backstop in case the re-raised signal could not be delivered.
  */
-#define EXIT_BY_SIGNAL( sig )  _EXIT( 128 + (sig) )
+#define EXIT_BY_SIGNAL( sig )                                        \
+	do{                                                              \
+		sigset_t _exit_by_signal_set;                                \
+		signal( (sig), SIG_DFL );                                    \
+		sigemptyset( &_exit_by_signal_set );                         \
+		sigaddset( &_exit_by_signal_set, (sig) );                    \
+		sigprocmask( SIG_UNBLOCK, &_exit_by_signal_set, NULL );      \
+		raise( (sig) );                                              \
+		_EXIT( 128 + (sig) );                                        \
+	}while( 0 )
 
 #endif /* SRC_LIB_LIMIT_H_ */

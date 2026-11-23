@@ -16,10 +16,17 @@ test-stix:
 	@echo "[TEST] $(notdir $(STIX_TEST_BIN))"
 	$(QUIET) $(STIX_TEST_BIN)
 
-# Exit-status regression (issue #2): an offline crash must exit 128+signum,
-# clean shutdowns (end of pcap, SIGINT, SIGTERM) must exit 0. Needs the
-# compiled probe binary — run `make ... compile` first.
+# Exit-status regression (issue #2): an offline crash must die by the
+# signal (a shell reports 128+signum), clean shutdowns (end of pcap,
+# SIGINT, SIGTERM) must exit 0. Needs the compiled probe binary — run
+# `make ... compile` first.
 .PHONY: test-crash
 test-crash:
 	@echo "[TEST] crash exit status"
 	$(QUIET) sh $(TOP_DIR)/test/crash_exit_status.sh
+
+# Aggregate: `make test` runs every suite. PR #3's test-snaplen joins the
+# prerequisites when the two branches are merged.
+.PHONY: test
+test: test-stix test-crash
+	@:
