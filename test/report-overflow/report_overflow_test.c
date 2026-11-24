@@ -139,6 +139,40 @@ static void test_gtp_report_complete( void ){
 	CHECK( strcmp( message, "\"8.8.8.8\",\"8.4.4.8\",[1234,5678]" ) == 0 );
 }
 
+//the reports are written to stdout: redirect it to a temporary capture file
+//so the emitted bytes can be checked, not only the return value. Returns the
+//capture file and stores a copy of the real stdout fd in *stdout_copy for
+//capture_restore()
+static FILE *capture_begin( int *stdout_copy ){
+	FILE *cap = tmpfile();
+	CHECK( cap != NULL );
+	fflush( stdout );
+	*stdout_copy = dup( fileno( stdout ));
+	CHECK( *stdout_copy >= 0
+			&& dup2( fileno( cap ), fileno( stdout )) >= 0 );
+	return cap;
+}
+
+//flush the captured writes, put the real stdout back and rewind the capture
+//file so the emitted bytes can be read from its start
+static void capture_restore( FILE *cap, int stdout_copy ){
+	fflush( stdout );
+	CHECK( dup2( stdout_copy, fileno( stdout )) >= 0 );
+	close( stdout_copy );
+	rewind( cap );
+}
+
+//read one emitted line from the capture file: it must be exactly
+//'[' + <len bytes of expect> + ']' + '\n'
+static void check_emitted( FILE *cap, const char *expect, size_t len ){
+	CHECK( fgetc( cap ) == '[' );
+	size_t i;
+	for( i=0; i<len; i++ )
+		CHECK( fgetc( cap ) == (unsigned char) expect[ i ] );
+	CHECK( fgetc( cap ) == ']' );
+	CHECK( fgetc( cap ) == '\n' );
+}
+
 //output._write surrounds a report by '[' and ']' to output it as JSON (or to
 //MongoDB): the wrap must fit a whole report, and a longer message must be
 //truncated rather than overflow new_msg
@@ -155,16 +189,17 @@ static void test_output_json_wrap( void ){
 	output_t *output = output_alloc_init( 0, &conf, 0, "test", false );
 	CHECK( output != NULL );
 
-	//the reports are written to stdout: send them to /dev/null to keep the
-	//output of this driver readable
-	FILE *devnull = fopen( "/dev/null", "w" );
-	CHECK( devnull != NULL );
-	fflush( stdout );
-	int stdout_copy = dup( fileno( stdout ));
-	int rc1 = dup2( fileno( devnull ), fileno( stdout ));
-	CHECK( stdout_copy >= 0 && rc1 >= 0 );
+	//the reports are written to stdout: capture them to check what is
+	//really emitted, not only the return value
+	int stdout_copy;
+	FILE *cap = capture_begin( &stdout_copy );
 
-	//a body of N, N-1 or N-2 bytes fills the report to its limit
+	//a body of N, N-1 or N-2 bytes fills the report to its limit: each call
+	//emits the report prefix and the part of the body that fits, bracketed.
+	//A reverted wrap fix cannot be observed through these lines: the
+	//out-of-bounds ']' and '\0' land contiguously past new_msg, so fprintf
+	//emits the same bytes — only ASan sees that overflow. The direct _write
+	//calls below are what give the cap a red without ASan
 	char body[ MAX_LENGTH_REPORT_MESSAGE + 1 ];
 	memset( body, 'A', MAX_LENGTH_REPORT_MESSAGE );
 	struct timeval ts = { .tv_sec = 1234, .tv_usec = 0 };
@@ -179,12 +214,43 @@ static void test_output_json_wrap( void ){
 		CHECK( ret == 1 );
 	}
 
-	fflush( stdout );
-	int rc2 = dup2( stdout_copy, fileno( stdout ));
-	CHECK( rc2 >= 0 );
-	close( stdout_copy );
-	fclose( devnull );
+	//output_write_report bounds its message at MAX_LENGTH_REPORT_MESSAGE, so
+	//the truncation cap inside _write is reachable only by calling _write
+	//directly (this driver includes output.c): an overlong message must emit
+	//only its first MAX_LENGTH_REPORT_MESSAGE bytes between the brackets.
+	//Without the cap the emitted line carries more body bytes than that, so
+	//this check fires without ASan when the overwrite reaches stdout
+	char overlong[ 2 * MAX_LENGTH_REPORT_MESSAGE + 1 ];
+	for( i=0; i < (int) sizeof( overlong ) - 1; i++ )
+		overlong[i] = 'a' + i % 26;
+	int overs[] = { MAX_LENGTH_REPORT_MESSAGE + 1,
+			2 * MAX_LENGTH_REPORT_MESSAGE };
+	for( i=0; i<2; i++ ){
+		overlong[ overs[i] ] = '\0';
+		CHECK( _write( output, CONF_OUTPUT_CHANNEL_STDOUT, overlong, false ) == 1 );
+	}
 
+	capture_restore( cap, stdout_copy );
+
+	//the three reports emit the same line: '[' + the CSV prefix + as many
+	//body bytes as fit a full report + ']' + '\n'
+	char report[ MAX_LENGTH_REPORT_MESSAGE ];
+	int m = snprintf( report, sizeof( report ), "%d,0,\"test\",%ld.%06ld,",
+			DUMMY_REPORT_TYPE, (long) ts.tv_sec, (long) ts.tv_usec );
+	CHECK( m > 0 && m < (int) sizeof( report ));
+	memset( report + m, 'A', sizeof( report ) - m );
+	for( i=0; i<3; i++ )
+		check_emitted( cap, report, sizeof( report ));
+
+	//the direct _write calls emit the first MAX_LENGTH_REPORT_MESSAGE bytes
+	//of the message inside the brackets, whatever its real length
+	check_emitted( cap, overlong, MAX_LENGTH_REPORT_MESSAGE );
+	check_emitted( cap, overlong, MAX_LENGTH_REPORT_MESSAGE );
+
+	//nothing else may have been written
+	CHECK( fgetc( cap ) == EOF );
+
+	fclose( cap );
 	output_release( output );
 }
 
@@ -194,6 +260,10 @@ static void test_output_json_wrap( void ){
 //message[ MAX_LENGTH_REPORT_MESSAGE ] buffer as the CSV row. A bundle that
 //fits is sent through the JSON wrap of output._write; a bundle that does not
 //fit, or a body that is not an alert, falls back to the bounded CSV row.
+//This function compiles only on branches that ship
+//src/modules/output_format/stix_format.c (intact-new-features does; main
+//does not — it would need both the source and libuuid): it is dead code on
+//main, kept so this driver file stays identical across branches.
 static void test_output_stix_alert( void ){
 	file_output_conf_t file_conf;
 	memset( &file_conf, 0, sizeof( file_conf )); //file channel disabled
@@ -207,14 +277,12 @@ static void test_output_stix_alert( void ){
 	output_t *output = output_alloc_init( 0, &conf, 0, "test", false );
 	CHECK( output != NULL );
 
-	//the reports are written to stdout: send them to /dev/null to keep the
-	//output of this driver readable
-	FILE *devnull = fopen( "/dev/null", "w" );
-	CHECK( devnull != NULL );
-	fflush( stdout );
-	int stdout_copy = dup( fileno( stdout ));
-	int rc1 = dup2( fileno( devnull ), fileno( stdout ));
-	CHECK( stdout_copy >= 0 && rc1 >= 0 );
+	//the reports are written to stdout: capture them so the emitted bytes
+	//can be checked — a bundle line in the capture proves the STIX path
+	//inside output_write_report really ran (a dead path, e.g. an out_size
+	//too small for any bundle, emits only CSV fallback rows)
+	int stdout_copy;
+	FILE *cap = capture_begin( &stdout_copy );
 
 	struct timeval ts = { .tv_sec = 1234, .tv_usec = 0 };
 	const char *trace = "{\"event_1\":{\"timestamp\":1682506925.089123,"
@@ -226,10 +294,13 @@ static void test_output_stix_alert( void ){
 
 	//the description is the only sizeable part of a bundle: sweep its length
 	//across the point where the bundle stops fitting the report buffer —
-	//both the STIX output and the CSV fallback must be observed
+	//both the STIX output and the CSV fallback must be observed. Keep going
+	//a few iterations past the first fallback so an over-large out_size at
+	//the construct_alert_stix_format call site provably writes past the
+	//report buffer under ASan, not only up to its last valid byte
 	int stix = 0, fallback = 0;
 	int i;
-	for( i=0; i<(int) sizeof( desc ) && ( !stix || !fallback ); i += 7 ){
+	for( i=0; i<(int) sizeof( desc ) && fallback < 5; i += 7 ){
 		int n = snprintf( body, sizeof( body ),
 				"20,\"detected\",\"attack\",\"%.*s\",%s", i, desc, trace );
 		CHECK( n > 0 && n < (int) sizeof( body ));
@@ -237,11 +308,10 @@ static void test_output_stix_alert( void ){
 				bundle, MAX_LENGTH_REPORT_MESSAGE ))
 			stix = 1;
 		else
-			fallback = 1;
+			fallback ++;
 		CHECK( output_write_report( output, CONF_OUTPUT_CHANNEL_STDOUT,
 				SECURITY_REPORT_TYPE, &ts, body ) == 1 );
 	}
-	CHECK( stix && fallback );
 
 	//a body at the report limit, alert-shaped or not, always falls back to
 	//the bounded CSV row
@@ -255,11 +325,24 @@ static void test_output_stix_alert( void ){
 				SECURITY_REPORT_TYPE, &ts, body ) == 1 );
 	}
 
-	fflush( stdout );
-	int rc2 = dup2( stdout_copy, fileno( stdout ));
-	CHECK( rc2 >= 0 );
-	close( stdout_copy );
-	fclose( devnull );
+	capture_restore( cap, stdout_copy );
+
+	//the capture must contain a real STIX bundle: the first emitted line is
+	//a fitting alert, wrapped by _write's brackets
+	long capsize;
+	CHECK( fseek( cap, 0, SEEK_END ) == 0 && ( capsize = ftell( cap )) > 0 );
+	rewind( cap );
+	char *emitted = malloc( capsize + 1 );
+	CHECK( emitted != NULL );
+	CHECK( fread( emitted, 1, capsize, cap ) == (size_t) capsize );
+	emitted[ capsize ] = '\0';
+	CHECK( emitted[0] == '[' );
+	CHECK( emitted[ capsize-2 ] == ']' && emitted[ capsize-1 ] == '\n' );
+	CHECK( strstr( emitted, "\"type\": \"bundle\"" ) != NULL );
+	free( emitted );
+	fclose( cap );
+
+	CHECK( stix && fallback );
 
 	output_release( output );
 }
