@@ -70,6 +70,7 @@ input {
     mode = ONLINE            # ONLINE (live) or OFFLINE (pcap file)
     source = "eth0"          # Interface name or PCAP file path
     snap-len = 0             # Bytes kept per packet, 0-262144 (0 = savefile's snaplen offline, 65535 online)
+                             # a value above 65535 scales each worker's ring by thread-queue (reserved address space of thread-queue * (48 + snap-len) bytes; about 16 GiB per worker at 65535 and 64 GiB at 262144 with the shipped thread-queue = 262144)
     buffer-size = 4096       # PCAP buffer size in bytes
     timeout = 1000           # PCAP buffer timeout in milliseconds
     dpdk-option = ""         # DPDK EAL options (DPDK mode only)
@@ -343,7 +344,7 @@ dump-pcap {
     protocols = {"unknown"}  # Protocols to dump
     period = 60              # New file every N seconds
     retain-files = 50
-    snap-len = 65355         # Bytes per packet in the dumped files, 0-262144
+    snap-len = 65355         # Bytes per packet in the dumped files, 0-262144; 0 writes header-only records (MIN(caplen, 0)) and is the compiled default
 }
 ```
 

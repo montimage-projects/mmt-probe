@@ -1240,6 +1240,7 @@ input {
     mode = ONLINE               # ONLINE for live capture, OFFLINE for pcap files
     source = "eth0"             # Interface name or pcap file path
     snap-len = 0                # Bytes kept per packet, 0-262144 (0 = savefile's snaplen offline, 65535 online)
+                                # a value above 65535 scales each worker's ring by thread-queue (reserved address space of thread-queue * (48 + snap-len) bytes; about 16 GiB per worker at 65535 and 64 GiB at 262144 with the shipped thread-queue = 262144)
     buffer-size = 4096          # Capture buffer size in bytes
     timeout = 1000              # Capture timeout in milliseconds
 }

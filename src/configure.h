@@ -412,7 +412,7 @@ bool conf_parse_input_mode( int *result, const char *string );
 /**
  * Parse a snap-len value: digits only, from 0 to PCAP_FILE_SNAP_LEN_MAX.
  * @param result receives the parsed value
- * @param value
+ * @param value the string to parse
  * @return false when value is not a number inside the accepted range
  */
 bool conf_parse_snap_len( uint32_t *result, const char *value );
