@@ -127,7 +127,9 @@ int _data_sprintf(char * buff, int len, int data_type, const void *data) {
 	attribute_t att;
 	att.data = (void*) data;
 	att.data_type = data_type;
-	return mmt_attr_sprintf(buff, len, &att);
+	//mmt_attr_sprintf reports the length it would have written: bound it to
+	//what was really appended so the offset stays inside the buffer
+	return bounded_snprintf_len( len, mmt_attr_sprintf(buff, len, &att) );
 }
 
 static size_t _get_string_values( size_t message_size, char *message,
@@ -147,25 +149,25 @@ static size_t _get_string_values( size_t message_size, char *message,
 
 		//separator
 		if( i!=0 )
-			message[offset ++] = ',';
+			offset += append_char( message + offset, message_size - offset, ',' );
 
 		is_string = is_string_datatype( data_type );
 		if( data != NULL ){
 			if( is_string )
 				//surround by quotes
-				message[ offset ++ ] = '"';
+				offset += append_char( message + offset, message_size - offset, '"' );
 			offset += _data_sprintf( message + offset, message_size - offset, data_type, data );
 			if( is_string )
-				message[ offset ++ ] = '"';
+				offset += append_char( message + offset, message_size - offset, '"' );
 		}else{
 			//no value, use default value:
 			// "" for string
 			// 0  for number
 			if( is_string ){
-				message[ offset ++ ] = '"';
-				message[ offset ++ ] = '"';
+				offset += append_char( message + offset, message_size - offset, '"' );
+				offset += append_char( message + offset, message_size - offset, '"' );
 			}else
-				message[ offset ++ ] = '0';
+				offset += append_char( message + offset, message_size - offset, '0' );
 		}
 	}
 	message[offset] = '\0';
@@ -394,7 +396,10 @@ static void _flush_reports_then_reset( query_based_report_context_t *rep, const 
 	rep->counter ++;
 
 	//the 2 first elements of reports: title, order
-	i = snprintf(message, message_size, "\"%s\",%zu,", config->title, rep->counter );
+	//snprintf reports the length it would have written: bound it to what was
+	//really appended so message_size cannot underflow below
+	i = bounded_snprintf_len( message_size,
+			snprintf(message, message_size, "\"%s\",%zu,", config->title, rep->counter ) );
 	message_size -= i;
 	p = message + i;
 	for( i=0; i<hash->capability; i++ ){
