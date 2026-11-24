@@ -16,6 +16,7 @@
 #include <unistd.h>
 #include <signal.h>
 #include <sys/time.h>
+#include <net/ethernet.h>
 
 #include "../../../lib/ms_timer.h"
 #include "../../../worker.h"
@@ -69,7 +70,6 @@ static inline uint32_t hash(uint32_t x) {
  * Two different tuples may get the same hash number, but a tuple must give only one hash number.
  */
 static inline uint32_t _get_packet_hash_number( const uint8_t *packet, size_t pkt_len ){
-	static int id = 0;
 	//Ethernet structure
 	struct __ethernet_struct {
 		uint8_t src[6];
@@ -90,13 +90,13 @@ static inline uint32_t _get_packet_hash_number( const uint8_t *packet, size_t pk
 	memcpy( &eth, packet, sizeof( eth ));
 
 
-	switch( eth.proto ){
+	switch( ntohs( eth.proto )){
 	//IP
-	case 0x08:
+	case ETHERTYPE_IP:
 		ip_offset = 26;
 		break;
 	//vlan
-	case 0x81:
+	case ETHERTYPE_VLAN:
 		ip_offset = 30;
 		break;
 	default:
@@ -123,16 +123,6 @@ static inline uint32_t _get_packet_hash_number( const uint8_t *packet, size_t pk
 	//try to get uniform distribution
 	hash_number = hash( hash_number );
 
-//	DEBUG("%4d %s %03d.%03d.%03d.%03d:%d -> %03d.%03d.%03d.%03d:%d == %u",
-//			++id,
-//			(proto_id == 6 )? "TCP" : "UDP",
-//			((ip_src << 24) >> 24), ((ip_src << 16) >> 24), ((ip_src << 8) >> 24), (ip_src >> 24),
-//			ntohs( port_src ),
-//			((ip_dst << 24) >> 24), ((ip_dst << 16) >> 24), ((ip_dst << 8) >> 24), (ip_dst >> 24),
-//			ntohs( port_dst ),
-//			hash
-//	);
-//
 	return hash_number;
 }
 
