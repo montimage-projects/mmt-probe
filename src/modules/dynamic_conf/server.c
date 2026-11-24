@@ -20,6 +20,7 @@
 #include <string.h>
 #include <errno.h>
 #include <stdarg.h>
+#include <execinfo.h>
 
 #include "server.h"
 #include "mmt_bus.h"
@@ -380,18 +381,94 @@ static inline void _processing( int sock ) {
 	close( sock );
 }
 
+//the first termination signal this process received: a second one - a
+// repeat or a different, forwarded one - must exit it immediately (same
+// convention as signal_handler() in src/main.c)
+static volatile sig_atomic_t server_stop_signal = 0;
+
 /**
- * Tobe perfect: need signal-safety for
- * - log_write
- * - log_execution_trace
+ * Report a termination signal from inside _signal_handler(), where the
+ * logger - syslog - cannot be used: it is not async-signal-safe and a
+ * signal interrupting it inside a lock would deadlock the drain (the
+ * monitor's forwarded signal can arrive while a previous one is being
+ * handled). Only write() to stderr is used, as in
+ * _report_termination_signal() of src/main.c. The text keeps the
+ * "Received signal <n>" marker the logger produced.
+ */
+static void _report_termination_signal( int sig ){
+	static const char prefix[] = "mmt-probe: Received signal ";
+	static const char suffix[] = ". Exit dynamic configuration server.\n";
+	char num[ 4 ];
+	size_t i = 0;
+	//append the signal number: snprintf() is not async-signal-safe
+	if( sig > 99 ) num[ i++ ] = '0' + ( sig / 100 ) % 10;
+	if( sig > 9  ) num[ i++ ] = '0' + ( sig / 10 ) % 10;
+	num[ i++ ] = '0' + sig % 10;
+	if( write( STDERR_FILENO, prefix, sizeof( prefix ) - 1 ) < 0 ){}
+	if( write( STDERR_FILENO, num, i ) < 0 ){}
+	if( write( STDERR_FILENO, suffix, sizeof( suffix ) - 1 ) < 0 ){}
+}
+
+/**
+ * Report a second signal from inside a signal handler - the process then
+ * exits immediately. write() only, for the same reason as above.
+ */
+static void _report_second_signal( int sig ){
+	static const char prefix[] = "mmt-probe: Received signal ";
+	static const char suffix[] = " while processing other one. Exit immediately.\n";
+	char num[ 4 ];
+	size_t i = 0;
+	//append the signal number: snprintf() is not async-signal-safe
+	if( sig > 99 ) num[ i++ ] = '0' + ( sig / 100 ) % 10;
+	if( sig > 9  ) num[ i++ ] = '0' + ( sig / 10 ) % 10;
+	num[ i++ ] = '0' + sig % 10;
+	if( write( STDERR_FILENO, prefix, sizeof( prefix ) - 1 ) < 0 ){}
+	if( write( STDERR_FILENO, num, i ) < 0 ){}
+	if( write( STDERR_FILENO, suffix, sizeof( suffix ) - 1 ) < 0 ){}
+}
+
+/**
+ * Report a fatal signal from inside a signal handler. Only
+ * async-signal-safe primitives are used: a single write() to stderr for
+ * the one-line message, then backtrace_symbols_fd() which writes the
+ * backtrace directly to stderr - unlike backtrace_symbols() it does not
+ * allocate memory, so this still works when the crash happened inside the
+ * allocator (see _report_crash_signal() in src/main.c). The text keeps
+ * the "Segv signal received on control process!" marker the logger
+ * produced.
+ */
+static void _report_crash_signal(){
+	static const char msg[] =
+		"mmt-probe: Segv signal received on control process!\n";
+	if( write( STDERR_FILENO, msg, sizeof( msg ) - 1 ) < 0 ){}
+
+	void *frames[ 16 ];
+	int nb_frames = backtrace( frames, 16 );
+	backtrace_symbols_fd( frames, nb_frames, STDERR_FILENO );
+}
+
+/**
+ * This signal handler ensures clean exits of the control process.
+ * Only async-signal-safe calls may run here - write(), close(), unlink(),
+ * _exit(), backtrace_symbols_fd() - never the logger (syslog) nor malloc,
+ * exactly as signal_handler() in src/main.c.
  * @param type
  */
 static void _signal_handler( int type ){
+	//a second signal while draining - e.g., a group-wide kill plus the
+	// monitor's forward - exits right now, without touching the logger
+	// which the interrupted code may hold a lock of
+	if( server_stop_signal != 0 ){
+		_report_second_signal( type );
+		EXIT_NORMALLY();
+	}
+
 	switch( type ){
 	case SIGINT:
 	case SIGTERM:
 
-		log_write(LOG_INFO, "Received signal %d. Exit dynamic configuration server.", type);
+		server_stop_signal = type;
+		_report_termination_signal( type );
 		close( socket_fd );
 		unlink( address.sun_path );
 
@@ -401,8 +478,7 @@ static void _signal_handler( int type ){
 		break;
 
 	case SIGSEGV:
-		log_write(LOG_ERR, "Segv signal received on control process!");
-		log_execution_trace();
+		_report_crash_signal();
 
 		//Auto restart when segmentation fault
 		EXIT_TOBE_RESTARTED();
@@ -410,7 +486,11 @@ static void _signal_handler( int type ){
 		break;
 
 	case SIGRES:
-		log_write(LOG_ERR, "Restart signal received! Cleaning up before restarting!");
+		{
+			static const char restart_msg[] =
+				"mmt-probe: Restart signal received! Cleaning up before restarting!\n";
+			if( write( STDERR_FILENO, restart_msg, sizeof( restart_msg ) - 1 ) < 0 ){}
+		}
 		EXIT_TOBE_RESTARTED();
 	}
 }
@@ -419,6 +499,16 @@ bool dynamic_conf_server_start_processing( const char* unix_domain_descriptor ){
 	int  newsock_fd;
 	struct sockaddr_un cli_addr;
 	socklen_t sock_len = sizeof( cli_addr );
+
+	//resolve the backtrace machinery now, before the signal handler is
+	// installed: the first backtrace() call lazily loads libgcc_s (dlopen +
+	// malloc, not async-signal-safe) - inside a crash handler that could
+	// deadlock or fault before the process dies by the signal (same as in
+	// _main_processing(), src/main.c)
+	{
+		void *frames[ 1 ];
+		(void) backtrace( frames, 1 );
+	}
 
 	//default signal to exit
 	signal( SIGINT,  _signal_handler );
