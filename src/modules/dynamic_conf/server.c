@@ -30,14 +30,37 @@
 #include "../../lib/tools.h"
 #include "../../lib/memory.h"
 #include "../../lib/limit.h"
+#include "../../lib/string_builder.h"
 #include "../../configure_override.h"
 
 //we allocate buffer to be able to stock at least one command
 #define BUFFER_SIZE        ( sizeof( command_t) )
 #define LENGTH( string )   (sizeof( string ) - 1 )
-#define IS_CMD( buf, cmd ) (0 == strncmp( buf, cmd, LENGTH( cmd ) ))
+//a command is the whole received string: "startXYZ" is not "start"
+#define IS_CMD( buf, cmd ) (0 == strcmp( buf, cmd ))
+//the update command prefixes its parameters, glued on: "update{...}"
+#define IS_CMD_PREFIX( buf, cmd ) (0 == strncmp( buf, cmd, LENGTH( cmd ) ))
 
 #define NEW_LINE '\n'
+
+/**
+ * Write all len bytes of message to sock.
+ * The loop stops at the first error: a -1 return is retried only on EINTR
+ * and is never added to the index, so the loop always terminates.
+ * @return the number of bytes written
+ */
+static inline size_t _write_all( int sock, const char *message, size_t len ){
+	size_t written = 0;
+	while( written < len ){
+		ssize_t ret = write( sock, message + written, len - written );
+		if( ret == -1 && errno == EINTR )
+			continue;
+		if( ret <= 0 )
+			break;
+		written += ret;
+	}
+	return written;
+}
 
 /**
  * Response to control client in form: code description
@@ -48,17 +71,18 @@
 __attribute__((format (printf, 3, 4)))
 static inline void _reply( int sock, uint16_t code, const char *format, ... ){
 	char message[ BUFFER_SIZE ];
-	int offset = snprintf( message, BUFFER_SIZE, "%d ", code);
+	//snprintf and vsnprintf report the length they would have written:
+	// bound it to what really landed in message (a negative return counts
+	// as nothing written), so offset never moves past the buffer
+	size_t offset = bounded_snprintf_len( BUFFER_SIZE,
+			snprintf( message, BUFFER_SIZE, "%d ", code));
 	va_list args;
 	va_start( args, format );
-	offset += vsnprintf( message + offset, BUFFER_SIZE - offset, format, args);
+	offset += bounded_snprintf_len( BUFFER_SIZE - offset,
+			vsnprintf( message + offset, BUFFER_SIZE - offset, format, args));
 	va_end( args );
 
-	int i=0;
-
-	do{
-		i += write( sock, message + i, offset -i );
-	}while( i<offset );
+	_write_all( sock, message, offset );
 }
 
 size_t parse_command_parameters( const char *buffer, size_t buffer_size, command_param_t * lst, size_t size ){
@@ -66,12 +90,18 @@ size_t parse_command_parameters( const char *buffer, size_t buffer_size, command
 	uint16_t ident, data_len;
 	const char *data;
 	while( offset < buffer_size && ret < size ){
+		//a parameter header is 4 bytes: identity, then data length
+		if( offset + 4 > buffer_size )
+			break;
 		//1. The first 2bytes is identity
 		assign_2bytes( &ident, &buffer[ offset ]);
 		offset += 2;
 		//2. The next 2bytes is data length
 		assign_2bytes( &data_len, &buffer[ offset ]);
 		offset += 2;
+		//the data value must fit in what remains of the message
+		if( offset + data_len > buffer_size )
+			break;
 		//3. data
 		data = &buffer[offset];
 
@@ -136,20 +166,31 @@ static inline int _parse_update_parameters( char *buffer, size_t buffer_len, cha
 	}
 	buffer ++; //jump over {
 	buffer_len -= 2; //exclude { and }
+
+	//the body is a list of NEW_LINE-ended "name=value" lines, surrounded
+	// by a leading and a final NEW_LINE: "update{}" has no body at all and
+	// "update{\n}" holds only the newlines - reject an empty or truncated
+	// body before the scans below run on an exhausted buffer
+	if( buffer_len < 2 || buffer[0] != NEW_LINE
+			|| buffer[ buffer_len - 1 ] != NEW_LINE ){
+		_reply( sock, CMD_SYNTAX_ERROR, "The update command must contain at least one parameter ended by \\n\n" );
+		return 0;
+	}
+	//a '}' only terminates the command: one inside the body is malformed
+	if( memchr( buffer, '}', buffer_len ) != NULL ){
+		_reply( sock, CMD_SYNTAX_ERROR, "Parameters of update command must not contain '}'\n" );
+		return 0;
+	}
 	buffer[ buffer_len ] = '\0'; //well null-terminated
 
-	//jump over \n
+	//jump over the leading NEW_LINE
 	buffer ++;
 	buffer_len -= 1;
 
 	//2. check parameters
-
-	//each parameter must be ended by \n
-	if( buffer[ buffer_len - 1 ] != NEW_LINE ){
-		_reply( sock, CMD_SYNTAX_ERROR, "The last parameter of update command must ended by \\n\n" );
-		return 0;
-	}
-
+	//every scan below stays inside the parameter body: a malformed line
+	// stops at `end`, never past the buffer
+	char *end = buffer + buffer_len;
 
 	ident_str = buffer;
 	val_str   = ident_str;
@@ -159,17 +200,22 @@ static inline int _parse_update_parameters( char *buffer, size_t buffer_len, cha
 		//val_str = 'input.mode=online\nabc.xyz=12\n'
 
 		//we need to jump over the first = character
-		while( *val_str != NEW_LINE && *val_str != '=' )
+		while( val_str < end && *val_str != NEW_LINE && *val_str != '=' )
 			val_str ++;
 
 		//not found = character
-		if( *val_str == NEW_LINE ){
-			*val_str = '\0'; //terminate ident_str to be able to used in the next _reply
+		if( val_str >= end || *val_str == NEW_LINE ){
+			if( val_str < end )
+				*val_str = '\0'; //terminate ident_str to be able to used in the next _reply
 			_reply( sock, CMD_SYNTAX_ERROR, "Parameter and its value (%s) must be separated by '='\n", ident_str );
 			return 0;
 		}
 
-		//We have (*val_str == '=')
+		//We have (*val_str == '='): the name cannot be empty
+		if( val_str == ident_str ){
+			_reply( sock, CMD_SYNTAX_ERROR, "Empty parameter name in update command\n" );
+			return 0;
+		}
 		*val_str = '\0'; //null-ended for ident_str;
 		//jump over '\0' above
 		val_str ++;
@@ -185,8 +231,15 @@ static inline int _parse_update_parameters( char *buffer, size_t buffer_len, cha
 
 		//count the length of data value
 		val_len = 0;
-		while( val_str[ val_len ] != NEW_LINE )
+		while( val_str + val_len < end && val_str[ val_len ] != NEW_LINE )
 			val_len ++;
+
+		//the value must end by \n inside the body - checked above, so
+		// reaching `end` here can only come from a malformed line
+		if( val_str + val_len >= end ){
+			_reply( sock, CMD_SYNTAX_ERROR, "The last parameter of update command must ended by \\n\n" );
+			return 0;
+		}
 
 		//value is empty
 		if( val_len == 0 ){
@@ -231,14 +284,15 @@ static inline int _parse_update_parameters( char *buffer, size_t buffer_len, cha
 		val_str  += val_len; //to the next
 		ident_str = val_str;
 
-	}while( *val_str != '\0'); //reach to the end of string
+	}while( val_str < end ); //reach to the end of the parameter body
 
 	//3. everything are ok
 	return offset;
 }
 
 static inline void _reply_list_of_update_parameters( int sock ){
-	int i, size, ret, total_bytes_to_write;
+	int i;
+	size_t size, written = 0, total_bytes_to_write = 0;
 	const char *data_type_strings[] = {
 			"",
 			"boolean",
@@ -253,19 +307,21 @@ static inline void _reply_list_of_update_parameters( int sock ){
 	size_t nb_parameters = conf_get_identities( &identities );
 
 	//number of elements
-	size = snprintf( message, BUFFER_SIZE, "%zu\n", nb_parameters - 1 ); //-NO_SUPPORT
+	size = bounded_snprintf_len( BUFFER_SIZE,
+			snprintf( message, BUFFER_SIZE, "%zu\n", nb_parameters - 1 )); //-NO_SUPPORT
 
 	total_bytes_to_write = size;
-	ret = write( sock, message, size );
+	written = _write_all( sock, message, size );
 
 	for( i=0; i<nb_parameters; i++ )
 		if( identities[i].data_type !=NO_SUPPORT  ){
-			size = snprintf( message, BUFFER_SIZE, "%s (%s)\n", identities[i].ident, data_type_strings[identities[i].data_type]);
+			size = bounded_snprintf_len( BUFFER_SIZE,
+					snprintf( message, BUFFER_SIZE, "%s (%s)\n", identities[i].ident, data_type_strings[identities[i].data_type]));
 			total_bytes_to_write += size;
-			ret   += write( sock, message, size );
+			written += _write_all( sock, message, size );
 		}
-	if( ret != total_bytes_to_write )
-		log_write( LOG_ERR, "Error while writing response (%d < %d bytes)", ret, total_bytes_to_write );
+	if( written != total_bytes_to_write )
+		log_write( LOG_ERR, "Error while writing response (%zu < %zu bytes)", written, total_bytes_to_write );
 }
 
 static int socket_fd = 0;
@@ -295,11 +351,10 @@ static inline void _processing( int sock ) {
 			goto _finish;
 		}
 		else if( ret == 0 ){
-			//no data is available
-			if( buffer_len == 0 ){
-				usleep(1);
-				continue;
-			}
+			//EOF with nothing received: the peer is gone - end the
+			// connection instead of spinning on read() forever
+			if( buffer_len == 0 )
+				goto _finish;
 			//no more data
 			else
 				goto _process_command;
@@ -342,8 +397,8 @@ static inline void _processing( int sock ) {
 		command.id = DYN_CONF_CMD_STOP;
 		command.parameter_length = 0;
 		cmd_str = CMD_STOP_STR;
-	} else //update
-	if (IS_CMD(buffer, CMD_UPDATE_STR)) {
+	} else //update: its parameters are glued to the command - "update{...}"
+	if (IS_CMD_PREFIX(buffer, CMD_UPDATE_STR "{")) {
 		ret = _parse_update_parameters(buffer + LENGTH(CMD_UPDATE_STR),
 				buffer_len - LENGTH(CMD_UPDATE_STR), command.parameter,
 				sizeof(command.parameter), sock);
@@ -515,6 +570,9 @@ bool dynamic_conf_server_start_processing( const char* unix_domain_descriptor ){
 	signal( SIGTERM, _signal_handler );
 	signal( SIGSEGV, _signal_handler );
 	signal(SIGRES,   _signal_handler);
+	//a client closing the connection before the reply must not kill this
+	// process by SIGPIPE: write() then fails with EPIPE and is dropped
+	signal( SIGPIPE, SIG_IGN );
 	//use UNIX socket
 	if ((socket_fd = socket(AF_UNIX, SOCK_STREAM, 0)) == -1) {
 		ABORT( "Error when opening socket: %s", strerror( errno ) );
@@ -523,7 +581,21 @@ bool dynamic_conf_server_start_processing( const char* unix_domain_descriptor ){
 
 	memset(&address, 0, sizeof( address ));
 	address.sun_family = AF_UNIX;
-	strncpy( address.sun_path, unix_domain_descriptor, sizeof( address.sun_path ) );
+	//the descriptor is config-controlled: one that does not fit into
+	// sun_path with its terminating '\0' is rejected here, at start-up,
+	// instead of leaving sun_path unterminated for bind() and unlink()
+	const size_t descriptor_len = strlen( unix_domain_descriptor );
+	if( descriptor_len >= sizeof( address.sun_path )){
+		//a signal death by ABORT would be re-created by the monitor over
+		// the same bad config, about once a second: report the error once
+		// and stop the probe for good
+		log_write( LOG_ERR, "dynamic-config.descriptor is too long: %zu characters (maximum %zu). Aborted",
+				descriptor_len, sizeof( address.sun_path ) - 1 );
+		fprintf( stderr, "dynamic-config.descriptor is too long: %zu characters (maximum %zu). Aborted\n",
+				descriptor_len, sizeof( address.sun_path ) - 1 );
+		EXIT_NO_RESTART();
+	}
+	memcpy( address.sun_path, unix_domain_descriptor, descriptor_len + 1 );
 	unlink( address.sun_path ); //remove the existing file
 
 	if (bind(socket_fd, (struct sockaddr *)&address, strlen(address.sun_path) + sizeof(address.sun_family)) == -1) {

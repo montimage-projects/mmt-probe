@@ -122,6 +122,33 @@ test-report-overflow: --check-dpi-folder $(REPORT_OVERFLOW_TEST_BIN)
 	$(QUIET) status=0; $(REPORT_OVERFLOW_TEST_BIN) || status=$$?; \
 		$(RM) $(REPORT_OVERFLOW_TEST_OBJDIR) $(REPORT_OVERFLOW_TEST_BIN); exit $$status
 
+# Dynamic-conf reply bounds: _reply() must truncate a reply longer than
+# BUFFER_SIZE instead of sending stack bytes past the buffer to the client,
+# the write loop must stop on error, command words must match whole
+# commands, and an over-long dynamic-config.descriptor must be rejected at
+# start-up. The driver is built with ASan and its objects live under
+# test/dynconf-reply/ so a parallel `make -j test` does not race the normal
+# build in src/.
+DYNCONF_REPLY_TEST_DIR := $(TOP_DIR)/test/dynconf-reply
+DYNCONF_REPLY_TEST_OBJDIR := $(DYNCONF_REPLY_TEST_DIR)/obj-asan
+DYNCONF_REPLY_TEST_BIN  := $(DYNCONF_REPLY_TEST_DIR)/dynconf-reply-test
+DYNCONF_REPLY_TEST_SRCS := $(DYNCONF_REPLY_TEST_DIR)/dynconf_reply_test.c
+DYNCONF_REPLY_TEST_OBJS := $(addprefix $(DYNCONF_REPLY_TEST_OBJDIR)/, \
+	$(addsuffix .o, $(basename $(notdir $(DYNCONF_REPLY_TEST_SRCS)))))
+
+$(DYNCONF_REPLY_TEST_OBJS): $(DYNCONF_REPLY_TEST_OBJDIR)/%.o: $(DYNCONF_REPLY_TEST_DIR)/%.c
+	@mkdir -p $(DYNCONF_REPLY_TEST_OBJDIR)
+	$(QUIET) $(CC) $(CFLAGS) -fsanitize=address -c -o $@ $<
+
+$(DYNCONF_REPLY_TEST_BIN): $(DYNCONF_REPLY_TEST_OBJS)
+	$(QUIET) $(CC) $(CLDFLAGS) -fsanitize=address -o $@ $^ $(LIBS)
+
+.PHONY: test-dynconf-reply
+test-dynconf-reply: --check-dpi-folder $(DYNCONF_REPLY_TEST_BIN)
+	@echo "[TEST] dynconf-reply under ASan"
+	$(QUIET) status=0; $(DYNCONF_REPLY_TEST_BIN) || status=$$?; \
+		$(RM) $(DYNCONF_REPLY_TEST_OBJDIR) $(DYNCONF_REPLY_TEST_BIN); exit $$status
+
 # Online-mode signal handling and exit statuses (issues #7 and #10): the
 # supervisor forwards SIGTERM/SIGINT to the processing child and exits
 # with its status; a start-up error reports the do-not-restart status and
@@ -133,5 +160,5 @@ test-online-signals: compile
 	$(QUIET) sh $(TOP_DIR)/test/online_signals.sh
 
 .PHONY: test
-test: test-stix test-report-overflow-stix test-snaplen test-crash test-report-overflow test-online-signals
+test: test-stix test-report-overflow-stix test-snaplen test-crash test-report-overflow test-dynconf-reply test-online-signals
 	@:
