@@ -8,6 +8,8 @@ Type             = simple
 WorkingDirectory = /opt/mmt/probe/
 ExecStart        = /opt/mmt/probe/bin/probe
 Restart          = on-failure
+#exit status 3 is a definitive stop (start-up/config error): do not restart
+RestartPreventExitStatus = 3
 StandardOutput   = syslog
 StandardError    = syslog
 PIDFile          = /var/run/mmt-probe.pid
