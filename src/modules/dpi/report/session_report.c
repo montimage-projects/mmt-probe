@@ -207,6 +207,9 @@ static inline void _print_ip_session_report (const mmt_session_t * dpi_session, 
 		default:
 			DEBUG("Does not support stat_type = %d", session_stat->app_type );
 		}
+		//a report longer than the buffer is truncated, not split
+		if( unlikely( valid > MAX_LENGTH_REPORT_MESSAGE ))
+			valid = MAX_LENGTH_REPORT_MESSAGE;
 		message[ valid ] = '\0';
 	}
 
