@@ -17,6 +17,7 @@
 #include "socket_output.h"
 #include "../../../lib/log.h"
 #include "../../../lib/malloc.h"
+#include "../../../lib/string_builder.h"
 
 struct socket_output_struct{
 	int unix_socket_fd;
@@ -113,7 +114,10 @@ socket_output_t* socket_output_init( const socket_output_conf_t *config ){
 
 bool socket_output_send( socket_output_t *context, const char *msg ){
 	char m[MAX_LENGTH_REPORT_MESSAGE + 1 ];
-	size_t len = snprintf(m, MAX_LENGTH_REPORT_MESSAGE, "%s\n", msg);
+	//snprintf reports the length it would have written: bound it to what was
+	//really appended so send() never reads past the buffer
+	size_t len = bounded_snprintf_len( MAX_LENGTH_REPORT_MESSAGE,
+			snprintf(m, MAX_LENGTH_REPORT_MESSAGE, "%s\n", msg) );
 	bool ret = false;
 	if( context->unix_socket_fd != NO_SOCKET_FD ){
 		ret |= send( context->unix_socket_fd, m, len, MSG_WAITALL ) != -1;

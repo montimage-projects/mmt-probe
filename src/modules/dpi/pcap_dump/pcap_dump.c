@@ -281,7 +281,10 @@ pcap_dump_context_t* pcap_dump_start( uint16_t worker_index, const probe_conf_t 
 	int i;
 	for( i=0; i<context->config->protocols_size; i++ ){
 		context->proto_ids_lst[i] = get_protocol_id_by_name( context->config->protocols[i] );
-		index += snprintf(msg, MAX_LENGTH_REPORT_MESSAGE - index, ",%s", context->config->protocols[i] );
+		//snprintf reports the length it would have written: bound it to what
+		//was really appended so index cannot run past msg
+		index += bounded_snprintf_len( MAX_LENGTH_REPORT_MESSAGE - index,
+				snprintf(msg + index, MAX_LENGTH_REPORT_MESSAGE - index, ",%s", context->config->protocols[i] ) );
 	}
 
 	log_write(LOG_INFO, "Dump any packets containing protocol in the following list to '%s': %s",

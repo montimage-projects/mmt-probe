@@ -124,6 +124,9 @@ static inline int _write( output_t *output, output_channel_conf_t channels, cons
 		//surround message by [ and ]
 		new_msg[0] = '[';
 		size_t len = strlen( message );
+		//a full message still fits entirely; a longer one is truncated
+		if( len > sizeof( new_msg ) - 3 )
+			len = sizeof( new_msg ) - 3;
 		memcpy( new_msg + 1, message, len );
 		new_msg[ len+1 ] = ']';
 		new_msg[ len+2 ] = '\0';
@@ -279,7 +282,8 @@ int output_write_report_with_format( output_t *output, output_channel_conf_t cha
 		va_list args;
 		offset = 0;
 		va_start( args, format );
-		offset += vsnprintf( message + offset, MAX_LENGTH_REPORT_MESSAGE - offset, format, args);
+		offset += bounded_snprintf_len( MAX_LENGTH_REPORT_MESSAGE - offset,
+				vsnprintf( message + offset, MAX_LENGTH_REPORT_MESSAGE - offset, format, args) );
 		va_end( args );
 
 		message[ offset ] = '\0'; //well null-terminated
