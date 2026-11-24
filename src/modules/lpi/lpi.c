@@ -9,6 +9,7 @@
 #include "lpi.h"
 #include <mmt_core.h>
 #include <tcpip/mmt_tcpip.h>
+#include <net/ethernet.h>
 #include <pthread.h>
 
 struct lpi_struct{
@@ -222,13 +223,13 @@ bool lpi_process_packet( lpi_t *lpi, struct pkthdr *pkt_header, const u_char *pa
 	memcpy( &eth, packet, sizeof( eth ));
 
 
-	switch( eth.proto ){
+	switch( ntohs( eth.proto )){
 	//IP
-	case 0x08:
+	case ETHERTYPE_IP:
 		ip_offset = 26;
 		break;
 	//vlan
-	case 0x81:
+	case ETHERTYPE_VLAN:
 		ip_offset = 30;
 		break;
 	default:
