@@ -34,6 +34,7 @@ const char* conf_validate_data_value( const identity_t *ident, const char *data_
 	static char error_reason[1000];
 	int i;
 	int enum_val = 0;
+	uint32_t u32_val;
 
 	//special data type
 	switch( ident->val ){
@@ -56,6 +57,16 @@ const char* conf_validate_data_value( const identity_t *ident, const char *data_
 //		}
 //		break;
 //#endif
+	case CONF_ATT__INPUT__SNAP_LEN:
+#ifdef PCAP_DUMP_MODULE
+	case CONF_ATT__DUMP_PCAP__SNAP_LEN:
+#endif
+		if( conf_parse_snap_len( &u32_val, data_value ) )
+			return NULL;
+		snprintf( error_reason, sizeof( error_reason),
+				"Expect a number from 0 to %d as value of '%s' (not '%s')",
+				PCAP_FILE_SNAP_LEN_MAX, ident->ident, data_value );
+		return error_reason;
 	default:
 		break;
 	}
@@ -154,6 +165,23 @@ static inline bool _override_element_by_ident( probe_conf_t *conf, const identit
 		return true;
 #endif
 
+	//snap-len values are bounded by libpcap's maximum record size: a
+	// non-numeric, negative or bigger value is rejected instead of being
+	// silently wrapped into the field
+	case CONF_ATT__INPUT__SNAP_LEN:
+#ifdef PCAP_DUMP_MODULE
+	case CONF_ATT__DUMP_PCAP__SNAP_LEN:
+#endif
+		if( ! conf_parse_snap_len( &int_val, value_str ) ){
+			log_write( LOG_WARNING, "Unexpected value [%s] for [%s]: expect a number from 0 to %d",
+					value_str, ident->ident, PCAP_FILE_SNAP_LEN_MAX );
+			return false;
+		}
+		//value does not change ==> do nothing
+		if( int_val == *((uint32_t *)field_ptr) )
+			return true;
+		*((uint32_t *)field_ptr) = int_val;
+		return true;
 	default:
 		break;
 	}

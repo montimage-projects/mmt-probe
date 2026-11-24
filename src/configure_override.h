@@ -156,7 +156,7 @@ DECLARE_CONF_ATT(
 	(CONF_ATT__INPUT__MODE,        "input.mode",        &conf->input->input_mode,   UINT16_T),
 	(CONF_ATT__INPUT__SOURCE,      "input.source",      &conf->input->input_source, CHAR_STAR),
 	(CONF_ATT__INPUT__PCAP_FILTER, "input.pcap-filter", &conf->input->pcap_filter,  CHAR_STAR),
-	(CONF_ATT__INPUT__SNAP_LEN,    "input.snap-len",    &conf->input->snap_len,     UINT16_T),
+	(CONF_ATT__INPUT__SNAP_LEN,    "input.snap-len",    &conf->input->snap_len,     UINT32_T),
 	(CONF_ATT__INPUT__BUFFER_SIZE, "input.buffer-size", &conf->input->buffer_size,  UINT32_T),
 	(CONF_ATT__INPUT__TIMEOUT,     "input.timeout",     &conf->input->timeout,      UINT32_T),
 
@@ -228,7 +228,7 @@ DECLARE_CONF_ATT(
 	(CONF_ATT__DUMP_PCAP__PROTOCOLS,    "dump-pcap.protocols",    &conf->reports.pcap_dump->protocols,            LIST),
 	(CONF_ATT__DUMP_PCAP__PERIOD,       "dump-pcap.period",       &conf->reports.pcap_dump->frequency,            UINT16_T),
 	(CONF_ATT__DUMP_PCAP__RETAIN_FILES, "dump-pcap.retain-files", &conf->reports.pcap_dump->retained_files_count, UINT16_T),
-	(CONF_ATT__DUMP_PCAP__SNAP_LEN,     "dump-pcap.snap-len",     &conf->reports.pcap_dump->snap_len,             UINT16_T),
+	(CONF_ATT__DUMP_PCAP__SNAP_LEN,     "dump-pcap.snap-len",     &conf->reports.pcap_dump->snap_len,             UINT32_T),
 #endif
 
 	//system-report
