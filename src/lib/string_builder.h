@@ -343,6 +343,25 @@ static ALWAYS_INLINE int append_timeval( char *dst, size_t dst_size, const struc
 }
 
 /**
+ * Bound the value returned by a snprintf-style function (snprintf, vsnprintf,
+ * mmt_attr_sprintf, ...) to the number of bytes it really appended in a buffer
+ * of @p dst_size bytes. Those functions report the length they would have
+ * written, which may exceed the buffer size; accumulating it verbatim into an
+ * offset moves the offset past the end of the buffer.
+ * @param dst_size  size of the destination buffer given to the function
+ * @param ret       its return value (a negative value means "nothing written")
+ * @return the number of bytes really appended (the trailing '\0' excluded)
+ */
+static ALWAYS_INLINE int bounded_snprintf_len( size_t dst_size, int ret ){
+	if( unlikely( ret <= 0 ))
+		return 0;
+	if( unlikely( (size_t) ret >= dst_size ))
+		//dst_size-1 characters were written, then '\0'
+		return dst_size == 0 ? 0 : (int) dst_size - 1;
+	return ret;
+}
+
+/**
  * These helpers are used only inside STRING_BUILDER macro
  */
 #define __ARR(x)   append_string_without_quote ( __ptr+__i, __n-__i, x )
@@ -356,7 +375,7 @@ static ALWAYS_INLINE int append_timeval( char *dst, size_t dst_size, const struc
 
 #define __BUILDER( X ) if( __n > __i ) __i += X;
 #define __EMPTY()
-#define __SEPARATOR()  __i += append_string_without_quote( __ptr+__i, __n-__i, sepa );
+#define __SEPARATOR()  __BUILDER( append_string_without_quote( __ptr+__i, __n-__i, sepa ) )
 
 /**
  * Create a macro to build a string.

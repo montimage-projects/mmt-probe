@@ -17,6 +17,7 @@
 #include <arpa/inet.h>
 
 #include "../../../lib/inet.h"
+#include "../../../lib/string_builder.h"
 #include "../../../lib/malloc_ext.h"
 #include "session_report.h"
 
@@ -189,14 +190,21 @@ int print_gtp_report(char *message, size_t message_size, const mmt_session_t * d
 		//each TEID is separated by comma
 		// do not add comma before the first TEID
 		if( has_teid )
-			message[ret ++] = ',';
+			ret += append_char( &message[ret], message_size - ret, ',' );
 
 		ret += append_number( &message[ret], message_size - ret, gtp->teids[i] );
 		has_teid = true;
 	}
 
-	message[ret ++] = ']'; //close the array of TEIDs
-	message[ret ++] = '\0';
+	//close the array of TEIDs
+	ret += append_char( &message[ret], message_size - ret, ']' );
+
+	//well NULL-terminated: keep the terminator inside the buffer
+	if( message_size > 0 ){
+		if( unlikely( (size_t) ret >= message_size ))
+			ret = (int) message_size - 1;
+		message[ret] = '\0';
+	}
 
     return ret;
 }

@@ -46,7 +46,8 @@ static int _process_ieee802154_src_dst( char *msg, int length, uint32_t proto_id
 	int len = snprintf( msg , length, "\"%02x:%02x:%02x:%02x:%02x:%02x:%02x:%02x\"",
 			add[7], add[6], add[5], add[4], add[3], add[2], add[1], add[0] );
 
-	return len;
+	//snprintf reports the length it would have written
+	return bounded_snprintf_len( length, len );
 }
 
 /**
@@ -76,7 +77,7 @@ static inline int _get_attributes_values(const ipacket_t *packet,
 
 		//separator
 		if( i!=0 )
-			message[offset ++] = ',';
+			offset += append_char( message + offset, message_size - offset, ',' );
 
 		//special processing for IEEE_802154
 		int ret = _process_ieee802154_src_dst( message+offset, message_size - offset,
@@ -90,23 +91,25 @@ static inline int _get_attributes_values(const ipacket_t *packet,
 		if( attr_extract != NULL ){
 			if( is_string_datatype( attr_extract->data_type ) ){
 				//surround by quotes
-				message[ offset ++ ] = '"';
+				offset += append_char( message + offset, message_size - offset, '"' );
 				if( attr_extract != NULL )
-					offset += mmt_attr_sprintf( message + offset, message_size - offset, attr_extract );
-				message[ offset ++ ] = '"';
+					offset += bounded_snprintf_len( message_size - offset,
+							mmt_attr_sprintf( message + offset, message_size - offset, attr_extract ) );
+				offset += append_char( message + offset, message_size - offset, '"' );
 			}
 			else
-				offset += mmt_attr_sprintf( message + offset, message_size - offset, attr_extract );
+				offset += bounded_snprintf_len( message_size - offset,
+						mmt_attr_sprintf( message + offset, message_size - offset, attr_extract ) );
 		}else{
 			empty_counter ++;
 			//no value, use default value:
 			// "" for string
 			// 0  for number
 			if( is_string_datatype( att->dpi_datatype )){
-				message[ offset ++ ] = '"';
-				message[ offset ++ ] = '"';
+				offset += append_char( message + offset, message_size - offset, '"' );
+				offset += append_char( message + offset, message_size - offset, '"' );
 			}else
-				message[ offset ++ ] = '0';
+				offset += append_char( message + offset, message_size - offset, '0' );
 		}
 	}
 
@@ -167,7 +170,8 @@ static void _event_report_handle( const ipacket_t *packet, attribute_t *attribut
 			//value
 			attribute_t * attr_extract = dpi_extract_attribute(packet, att); //get value of the attribute from the packet
 			if( attr_extract != NULL )
-				offset += mmt_attr_sprintf( message + offset, MAX_LENGTH_REPORT_MESSAGE - offset, attr_extract ); //append to the message
+				offset += bounded_snprintf_len( MAX_LENGTH_REPORT_MESSAGE - offset,
+						mmt_attr_sprintf( message + offset, MAX_LENGTH_REPORT_MESSAGE - offset, attr_extract ) ); //append to the message
 			else {
 				//no value, use default value:
 				// empty for string
@@ -175,7 +179,7 @@ static void _event_report_handle( const ipacket_t *packet, attribute_t *attribut
 				if( is_string_datatype( att->dpi_datatype )){
 					//nothing here
 				}else
-					message[ offset ++ ] = '0';
+					offset += append_char( message + offset, MAX_LENGTH_REPORT_MESSAGE - offset, '0' );
 			}
 			//suffix
 			offset += append_string_without_quote( message + offset, MAX_LENGTH_REPORT_MESSAGE - offset, att->suffix );
@@ -191,21 +195,21 @@ static void _event_report_handle( const ipacket_t *packet, attribute_t *attribut
 	offset += append_string( message + offset, MAX_LENGTH_REPORT_MESSAGE - offset, config->title );
 
 	//separator
-	message[offset] = ',';
-	offset ++;
+	offset += append_char( message + offset, MAX_LENGTH_REPORT_MESSAGE - offset, ',' );
 
 	//2. event data
 	if( is_string_datatype( attribute->data_type ) ){
 		//surround by quotes
-		message[ offset ++ ] = '"';
-		offset += mmt_attr_sprintf( message + offset, MAX_LENGTH_REPORT_MESSAGE - offset, attribute );
-		message[ offset ++ ] = '"';
+		offset += append_char( message + offset, MAX_LENGTH_REPORT_MESSAGE - offset, '"' );
+		offset += bounded_snprintf_len( MAX_LENGTH_REPORT_MESSAGE - offset,
+				mmt_attr_sprintf( message + offset, MAX_LENGTH_REPORT_MESSAGE - offset, attribute ) );
+		offset += append_char( message + offset, MAX_LENGTH_REPORT_MESSAGE - offset, '"' );
 	}else
-		offset += mmt_attr_sprintf( message + offset, MAX_LENGTH_REPORT_MESSAGE - offset, attribute );
+		offset += bounded_snprintf_len( MAX_LENGTH_REPORT_MESSAGE - offset,
+				mmt_attr_sprintf( message + offset, MAX_LENGTH_REPORT_MESSAGE - offset, attribute ) );
 
 	//separator
-	message[offset] = ',';
-	offset ++;
+	offset += append_char( message + offset, MAX_LENGTH_REPORT_MESSAGE - offset, ',' );
 
 	//3. attributes data
 	offset += _get_attributes_values( packet,

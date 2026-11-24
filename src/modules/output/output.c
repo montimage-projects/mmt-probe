@@ -263,7 +263,8 @@ int output_write_report_with_format( output_t *output, output_channel_conf_t cha
 		va_list args;
 		offset = 0;
 		va_start( args, format );
-		offset += vsnprintf( message + offset, MAX_LENGTH_REPORT_MESSAGE - offset, format, args);
+		offset += bounded_snprintf_len( MAX_LENGTH_REPORT_MESSAGE - offset,
+				vsnprintf( message + offset, MAX_LENGTH_REPORT_MESSAGE - offset, format, args) );
 		va_end( args );
 
 		message[ offset ] = '\0'; //well null-terminated
