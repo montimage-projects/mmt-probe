@@ -389,8 +389,9 @@ static inline void _processing( int sock ) {
 static void _signal_handler( int type ){
 	switch( type ){
 	case SIGINT:
+	case SIGTERM:
 
-		log_write(LOG_INFO, "Received SIGINT. Exit dynamic configuration server.");
+		log_write(LOG_INFO, "Received signal %d. Exit dynamic configuration server.", type);
 		close( socket_fd );
 		unlink( address.sun_path );
 
@@ -421,6 +422,7 @@ bool dynamic_conf_server_start_processing( const char* unix_domain_descriptor ){
 
 	//default signal to exit
 	signal( SIGINT,  _signal_handler );
+	signal( SIGTERM, _signal_handler );
 	signal( SIGSEGV, _signal_handler );
 	signal(SIGRES,   _signal_handler);
 	//use UNIX socket

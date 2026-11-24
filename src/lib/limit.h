@@ -217,6 +217,19 @@
  */
 #define EXIT_TOBE_RESTARTED()  _EXIT( EXIT_FAILURE )
 /**
+ * Exit status a child process reports to ask the monitor process for a
+ * definitive stop without being restarted: a start-up failure - e.g., a bad
+ * parameter value or an input the probe cannot use - would only fail the same
+ * way after a restart. It must differ from EXIT_SUCCESS, which also keeps the
+ * child dead, and from EXIT_FAILURE, which EXIT_TOBE_RESTARTED() uses to ask
+ * for a restart.
+ */
+#define EXIT_STATUS_NO_RESTART 3
+/**
+ * Exit the current process with EXIT_STATUS_NO_RESTART.
+ */
+#define EXIT_NO_RESTART()      _EXIT( EXIT_STATUS_NO_RESTART )
+/**
  * Terminate the current process as if it had been killed by the given signal:
  * restore the default disposition, unblock the signal (it is masked while its
  * handler is running) and re-raise it, so a consumer sees a real signal death
