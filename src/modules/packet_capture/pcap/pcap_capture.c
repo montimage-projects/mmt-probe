@@ -24,12 +24,10 @@
 #define BREAK_PCAP_NUMBER 0
 //the snap length used online when snap-len = 0 (the documented default in mmt-probe.conf); libpcap >= 1.10 itself allows up to 262144
 #define PCAP_SNAP_LEN_MAX 65535
-//the maximal snap length honoured from a savefile's header:
-// libpcap's own maximum (MAXIMUM_SNAPLEN in pcap-int.h, what
-// tcpdump's "-s 0" resolves to). The declared value is untrusted,
-// file-controlled data, so it never sizes the workers' rings beyond
-// this ceiling
-#define PCAP_FILE_SNAP_LEN_MAX 262144
+//the maximal snap length honoured from a savefile's header is
+// PCAP_FILE_SNAP_LEN_MAX (configure.h, libpcap's own maximum). The
+// declared value is untrusted, file-controlled data, so it never sizes
+// the workers' rings beyond that ceiling
 
 #include "pcap_capture.h"
 #include <tcpip/mmt_tcpip.h>
