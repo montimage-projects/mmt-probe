@@ -343,6 +343,13 @@ static void _report_second_signal( int sig ){
  *      pcap_breakloop(), which libpcap documents as signal-handler-safe.
  */
 void signal_handler(int type) {
+	//this handler returns to the interrupted code on the termination and
+	// restart arms below: errno must be left as it was found - a libc call
+	// inside the handler, e.g., a best-effort write() that fails, would
+	// otherwise clobber it. The crash arms never reach the restore: they
+	// _exit or die by the signal first.
+	int saved_errno = errno;
+
 	//remember signal type in order to restart its process
 	main_processing_signal = type;
 
@@ -434,6 +441,10 @@ void signal_handler(int type) {
 		}
 		_stop_modules( context );
 	}
+
+	//every path that falls through the switch returns to the interrupted
+	// code: restore the errno saved on entry (see above)
+	errno = saved_errno;
 }
 
 //need to clean resource before exiting each process
@@ -638,7 +649,11 @@ static volatile sig_atomic_t monitor_stop_signal = 0;
  * keeps the handler trivially async-signal-safe.
  */
 static void _monitor_signal_handler( int sig ){
+	//this handler returns to the interrupted code: keep errno as it was
+	// found (nothing here can set it today, but a future call could)
+	int saved_errno = errno;
 	monitor_stop_signal = sig;
+	errno = saved_errno;
 }
 
 /**

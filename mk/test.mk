@@ -104,6 +104,37 @@ test-online-signals: compile
 	@echo "[TEST] online signal forwarding"
 	$(QUIET) sh $(TOP_DIR)/test/online_signals.sh
 
+# errno preservation across returning signal handlers (issues #7 and #10,
+# review note N1): the SIGINT/SIGTERM/SIGRES arms of signal_handler()
+# return to the interrupted code, so a libc call inside the handler - a
+# failing best-effort write() - must not leave errno clobbered. The
+# driver includes src/main.c for the real handler and is compiled with
+# -ffunction-sections and linked with --gc-sections, so only the code the
+# handler reaches is kept and the probe's own main() - renamed by the
+# driver - is discarded; the single kept external, pcap_capture_stop, is
+# stubbed there.
+ERRNO_SIGNAL_TEST_DIR := $(TOP_DIR)/test/errno-signal
+ERRNO_SIGNAL_TEST_OBJDIR := $(ERRNO_SIGNAL_TEST_DIR)/obj-asan
+ERRNO_SIGNAL_TEST_BIN  := $(ERRNO_SIGNAL_TEST_DIR)/errno-signal-test
+ERRNO_SIGNAL_TEST_SRCS := $(ERRNO_SIGNAL_TEST_DIR)/errno_signal_test.c
+ERRNO_SIGNAL_TEST_OBJS := $(addprefix $(ERRNO_SIGNAL_TEST_OBJDIR)/, \
+	$(addsuffix .o, $(basename $(notdir $(ERRNO_SIGNAL_TEST_SRCS)))))
+
+$(ERRNO_SIGNAL_TEST_OBJS): $(ERRNO_SIGNAL_TEST_OBJDIR)/%.o: $(ERRNO_SIGNAL_TEST_DIR)/%.c
+	@mkdir -p $(ERRNO_SIGNAL_TEST_OBJDIR)
+	$(QUIET) $(CC) $(CFLAGS) -ffunction-sections -fsanitize=address -c -o $@ $<
+
+# $(CLDFLAGS) is not used here: its -rdynamic would export the renamed
+# probe_main and root the whole discarded call graph under --gc-sections
+$(ERRNO_SIGNAL_TEST_BIN): $(ERRNO_SIGNAL_TEST_OBJS)
+	$(QUIET) $(CC) -fsanitize=address -Wl,--gc-sections -o $@ $^ $(LIBS)
+
+.PHONY: test-errno-signal
+test-errno-signal: --check-dpi-folder $(ERRNO_SIGNAL_TEST_BIN)
+	@echo "[TEST] errno preserved across returning signal handlers"
+	$(QUIET) status=0; $(ERRNO_SIGNAL_TEST_BIN) || status=$$?; \
+		$(RM) $(ERRNO_SIGNAL_TEST_OBJDIR) $(ERRNO_SIGNAL_TEST_BIN); exit $$status
+
 .PHONY: test
-test: test-snaplen test-crash test-report-overflow test-dynconf-reply test-online-signals
+test: test-snaplen test-crash test-report-overflow test-dynconf-reply test-online-signals test-errno-signal
 	@:
