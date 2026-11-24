@@ -152,7 +152,7 @@ HASH_TEST_OBJS := $(addprefix $(HASH_TEST_OBJDIR)/, \
 
 # -fno-sanitize-recover makes a UBSan report fatal, so the leg fails rather
 # than passing with a printed report on the unfixed code
-$(HASH_TEST_OBJS): $(HASH_TEST_OBJDIR)/%.o: $(HASH_TEST_DIR)/%.c
+$(HASH_TEST_OBJS): $(HASH_TEST_OBJDIR)/%.o: $(HASH_TEST_DIR)/%.c $(SRC_DIR)/lib/hash.c
 	@mkdir -p $(HASH_TEST_OBJDIR)
 	$(QUIET) $(CC) $(CFLAGS) -fsanitize=address,undefined -fno-sanitize-recover=undefined -c -o $@ $<
 
