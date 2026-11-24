@@ -264,7 +264,8 @@ static inline int append_number( char *dst, size_t dst_size, uint64_t val ){
 	while( val >= 100 ){
 		pos = val % 100;
 		val /= 100;
-		memcpy( c-1, digit_pairs + 2*pos, 2 );
+		c[-1] = digit_pairs[ 2*pos ];
+		c[ 0] = digit_pairs[ 2*pos + 1 ];
 		c -= 2;
 	}
 
