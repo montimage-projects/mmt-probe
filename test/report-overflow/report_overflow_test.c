@@ -14,8 +14,8 @@
  * structures are private to the .c files.
  */
 
-#include <assert.h>
 #include <stdio.h>
+#include <stdlib.h>
 #include <string.h>
 #include <unistd.h>
 
@@ -27,6 +27,16 @@
 #undef MQTT_MODULE
 #undef SOCKET_MODULE
 
+//the probe always builds with -DNDEBUG, so assert() would compile to nothing
+//here: CHECK always evaluates its condition, prints file:line and the
+//failing condition on stderr, and exits non-zero
+#define CHECK( cond ) do { \
+	if( !(cond) ){ \
+		fprintf( stderr, "%s:%d: check failed: %s\n", __FILE__, __LINE__, #cond ); \
+		exit( 1 ); \
+	} \
+} while( 0 )
+
 #include "../../src/lib/limit.h"
 #include "../../src/modules/output/file/file_output.c"
 #include "../../src/modules/output/output.c"
@@ -37,14 +47,14 @@
 //bounded_snprintf_len maps a snprintf-style return value to the number of
 //bytes really appended in the destination buffer
 static void test_bounded_snprintf_len( void ){
-	assert( bounded_snprintf_len( 10, -1 ) == 0 ); //error: nothing written
-	assert( bounded_snprintf_len( 10,  0 ) == 0 );
-	assert( bounded_snprintf_len( 10,  3 ) == 3 ); //everything fitted
-	assert( bounded_snprintf_len( 10,  9 ) == 9 ); //fits exactly, no room for '\0'
-	assert( bounded_snprintf_len( 10, 10 ) == 9 ); //truncated: 9 bytes + '\0'
-	assert( bounded_snprintf_len( 10, 50 ) == 9 ); //truncated
-	assert( bounded_snprintf_len(  1,  5 ) == 0 ); //room for '\0' only
-	assert( bounded_snprintf_len(  0,  5 ) == 0 ); //empty destination
+	CHECK( bounded_snprintf_len( 10, -1 ) == 0 ); //error: nothing written
+	CHECK( bounded_snprintf_len( 10,  0 ) == 0 );
+	CHECK( bounded_snprintf_len( 10,  3 ) == 3 ); //everything fitted
+	CHECK( bounded_snprintf_len( 10,  9 ) == 9 ); //fits exactly, no room for '\0'
+	CHECK( bounded_snprintf_len( 10, 10 ) == 9 ); //truncated: 9 bytes + '\0'
+	CHECK( bounded_snprintf_len( 10, 50 ) == 9 ); //truncated
+	CHECK( bounded_snprintf_len(  1,  5 ) == 0 ); //room for '\0' only
+	CHECK( bounded_snprintf_len(  0,  5 ) == 0 ); //empty destination
 }
 
 //_print_ip_session_report appends each app report at message + valid, then
@@ -73,8 +83,8 @@ static void test_rtp_report_truncated( void ){
 	//this is the write _print_ip_session_report does after the switch: it is
 	//out-of-bounds when the writer returned its would-be length
 	message[ valid ] = '\0';
-	assert( valid <= MAX_LENGTH_REPORT_MESSAGE );
-	assert( strlen( message + MAX_LENGTH_REPORT_MESSAGE - 10 ) == (size_t) valid - ( MAX_LENGTH_REPORT_MESSAGE - 10 ));
+	CHECK( valid <= MAX_LENGTH_REPORT_MESSAGE );
+	CHECK( strlen( message + MAX_LENGTH_REPORT_MESSAGE - 10 ) == (size_t) valid - ( MAX_LENGTH_REPORT_MESSAGE - 10 ));
 }
 
 //print_gtp_report appends the list of TEIDs then ']' and '\0' unconditionally:
@@ -99,8 +109,8 @@ static void test_gtp_report_truncated( void ){
 
 	int ret = print_gtp_report( message, sizeof( message ), NULL, &session_stat, NULL );
 
-	assert( ret >= 0 && ret < (int) sizeof( message ));
-	assert( strlen( message ) == (size_t) ret );
+	CHECK( ret >= 0 && ret < (int) sizeof( message ));
+	CHECK( strlen( message ) == (size_t) ret );
 }
 
 //an app report that fits entirely must be written as before
@@ -115,16 +125,18 @@ static void test_gtp_report_complete( void ){
 	memset( &gtp, 0, sizeof( gtp ));
 	gtp.ip_version  = 4;
 	gtp.ip_src.ipv4 = 0x08080808;
-	gtp.ip_dst.ipv4 = 0x08080404;
+	gtp.ip_dst.ipv4 = 0x08040408;
 	gtp.teids[0]    = 1234;
 	gtp.teids[1]    = 5678;
 	session_stat.apps.gtp = &gtp;
 
 	int ret = print_gtp_report( message, sizeof( message ), NULL, &session_stat, NULL );
 
-	assert( ret > 0 && ret < (int) sizeof( message ));
-	assert( strlen( message ) == (size_t) ret );
-	assert( strcmp( message, "\"8.8.8.8\",\"8.4.4.8\",[1234,5678]" ) == 0 );
+	CHECK( ret > 0 && ret < (int) sizeof( message ));
+	CHECK( strlen( message ) == (size_t) ret );
+	//0x08040408 is palindromic: append_ipv4 reads the address byte by byte,
+	//so it prints "8.4.4.8" on both little- and big-endian hosts
+	CHECK( strcmp( message, "\"8.8.8.8\",\"8.4.4.8\",[1234,5678]" ) == 0 );
 }
 
 //output._write surrounds a report by '[' and ']' to output it as JSON (or to
@@ -141,18 +153,18 @@ static void test_output_json_wrap( void ){
 	conf.file      = &file_conf;
 
 	output_t *output = output_alloc_init( 0, &conf, 0, "test", false );
-	assert( output != NULL );
+	CHECK( output != NULL );
 
 	//the reports are written to stdout: send them to /dev/null to keep the
 	//output of this driver readable
 	FILE *devnull = fopen( "/dev/null", "w" );
-	assert( devnull != NULL );
+	CHECK( devnull != NULL );
 	fflush( stdout );
 	int stdout_copy = dup( fileno( stdout ));
 	int rc1 = dup2( fileno( devnull ), fileno( stdout ));
-	assert( stdout_copy >= 0 && rc1 >= 0 );
+	CHECK( stdout_copy >= 0 && rc1 >= 0 );
 
-	//a body of 3000, 2999 or 2998 bytes fills the report to its limit
+	//a body of N, N-1 or N-2 bytes fills the report to its limit
 	char body[ MAX_LENGTH_REPORT_MESSAGE + 1 ];
 	memset( body, 'A', MAX_LENGTH_REPORT_MESSAGE );
 	struct timeval ts = { .tv_sec = 1234, .tv_usec = 0 };
@@ -164,17 +176,94 @@ static void test_output_json_wrap( void ){
 		body[ sizes[i] ] = '\0';
 		int ret = output_write_report( output, CONF_OUTPUT_CHANNEL_STDOUT,
 				DUMMY_REPORT_TYPE, &ts, body );
-		assert( ret == 1 );
+		CHECK( ret == 1 );
 	}
 
 	fflush( stdout );
 	int rc2 = dup2( stdout_copy, fileno( stdout ));
-	assert( rc2 >= 0 );
+	CHECK( rc2 >= 0 );
 	close( stdout_copy );
 	fclose( devnull );
 
 	output_release( output );
 }
+
+#ifdef STIX_FORMAT
+//with STIX_FORMAT kept in, a SECURITY_REPORT_TYPE report is first offered to
+//construct_alert_stix_format, which writes its bundle into the same
+//message[ MAX_LENGTH_REPORT_MESSAGE ] buffer as the CSV row. A bundle that
+//fits is sent through the JSON wrap of output._write; a bundle that does not
+//fit, or a body that is not an alert, falls back to the bounded CSV row.
+static void test_output_stix_alert( void ){
+	file_output_conf_t file_conf;
+	memset( &file_conf, 0, sizeof( file_conf )); //file channel disabled
+
+	output_conf_t conf;
+	memset( &conf, 0, sizeof( conf ));
+	conf.is_enable = true;
+	conf.format    = OUTPUT_FORMAT_JSON;
+	conf.file      = &file_conf;
+
+	output_t *output = output_alloc_init( 0, &conf, 0, "test", false );
+	CHECK( output != NULL );
+
+	//the reports are written to stdout: send them to /dev/null to keep the
+	//output of this driver readable
+	FILE *devnull = fopen( "/dev/null", "w" );
+	CHECK( devnull != NULL );
+	fflush( stdout );
+	int stdout_copy = dup( fileno( stdout ));
+	int rc1 = dup2( fileno( devnull ), fileno( stdout ));
+	CHECK( stdout_copy >= 0 && rc1 >= 0 );
+
+	struct timeval ts = { .tv_sec = 1234, .tv_usec = 0 };
+	const char *trace = "{\"event_1\":{\"timestamp\":1682506925.089123,"
+			"\"attributes\":[[\"ip.src\",\"10.0.0.1\"],[\"ip.dst\",\"10.0.0.2\"]]}}";
+	char body[ 2 * MAX_LENGTH_REPORT_MESSAGE ];
+	char desc[ MAX_LENGTH_REPORT_MESSAGE ];
+	char bundle[ MAX_LENGTH_REPORT_MESSAGE + 1 ];
+	memset( desc, 'A', sizeof( desc ));
+
+	//the description is the only sizeable part of a bundle: sweep its length
+	//across the point where the bundle stops fitting the report buffer —
+	//both the STIX output and the CSV fallback must be observed
+	int stix = 0, fallback = 0;
+	int i;
+	for( i=0; i<(int) sizeof( desc ) && ( !stix || !fallback ); i += 7 ){
+		int n = snprintf( body, sizeof( body ),
+				"20,\"detected\",\"attack\",\"%.*s\",%s", i, desc, trace );
+		CHECK( n > 0 && n < (int) sizeof( body ));
+		if( construct_alert_stix_format( body, &ts, 0, "test",
+				bundle, MAX_LENGTH_REPORT_MESSAGE ))
+			stix = 1;
+		else
+			fallback = 1;
+		CHECK( output_write_report( output, CONF_OUTPUT_CHANNEL_STDOUT,
+				SECURITY_REPORT_TYPE, &ts, body ) == 1 );
+	}
+	CHECK( stix && fallback );
+
+	//a body at the report limit, alert-shaped or not, always falls back to
+	//the bounded CSV row
+	memset( body, 'A', MAX_LENGTH_REPORT_MESSAGE );
+	int sizes[] = { MAX_LENGTH_REPORT_MESSAGE,
+			MAX_LENGTH_REPORT_MESSAGE - 1,
+			MAX_LENGTH_REPORT_MESSAGE - 2 };
+	for( i=0; i<3; i++ ){
+		body[ sizes[i] ] = '\0';
+		CHECK( output_write_report( output, CONF_OUTPUT_CHANNEL_STDOUT,
+				SECURITY_REPORT_TYPE, &ts, body ) == 1 );
+	}
+
+	fflush( stdout );
+	int rc2 = dup2( stdout_copy, fileno( stdout ));
+	CHECK( rc2 >= 0 );
+	close( stdout_copy );
+	fclose( devnull );
+
+	output_release( output );
+}
+#endif
 
 //_process_ieee802154_src_dst wrote "" and returned 2 without looking at the
 //room left in the buffer: at a full report that wrote past the buffer and
@@ -185,20 +274,20 @@ static void test_ieee802154_attr_truncated( void ){
 	//the report is exactly full: nothing may be written
 	int ret0 = _process_ieee802154_src_dst( message + MAX_LENGTH_REPORT_MESSAGE, 0,
 			PROTO_IEEE802154, IEEE802154_SRC_ADDRESS_EXTENDED, NULL );
-	assert( ret0 == 0 );
+	CHECK( ret0 == 0 );
 
 	//room for the closing '\0' only
 	int ret1 = _process_ieee802154_src_dst( message + MAX_LENGTH_REPORT_MESSAGE, 1,
 			PROTO_IEEE802154, IEEE802154_DST_ADDRESS_EXTENDED, NULL );
-	assert( ret1 == 0 );
-	assert( message[ MAX_LENGTH_REPORT_MESSAGE ] == '\0' );
+	CHECK( ret1 == 0 );
+	CHECK( message[ MAX_LENGTH_REPORT_MESSAGE ] == '\0' );
 
 	//a fitting buffer still gets ""
 	char buf[8];
 	int ret2 = _process_ieee802154_src_dst( buf, sizeof( buf ), PROTO_IEEE802154,
 			IEEE802154_SRC_ADDRESS_EXTENDED, NULL );
-	assert( ret2 == 2 );
-	assert( strcmp( buf, "\"\"" ) == 0 );
+	CHECK( ret2 == 2 );
+	CHECK( strcmp( buf, "\"\"" ) == 0 );
 }
 
 int main( void ){
@@ -207,8 +296,11 @@ int main( void ){
 	test_gtp_report_truncated();
 	test_gtp_report_complete();
 	test_output_json_wrap();
+#ifdef STIX_FORMAT
+	test_output_stix_alert();
+#endif
 	test_ieee802154_attr_truncated();
 
-	printf( "report-overflow: all assertions passed\n" );
+	printf( "report-overflow: all checks passed\n" );
 	return 0;
 }
