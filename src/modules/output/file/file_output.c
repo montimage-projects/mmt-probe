@@ -138,8 +138,15 @@ static inline void _create_new_file( file_output_t *output ){
 }
 
 file_output_t* file_output_alloc_init( const file_output_conf_t *config, uint16_t id ){
-	if( config->is_enable == false )
+	if( config == NULL || config->is_enable == false )
 		return NULL;
+
+	//conf_validate() requires output-dir and output-file when is_enable: a
+	// NULL here would reach strlen() through __ARR() in _create_new_file()
+	if( config->directory == NULL || config->filename == NULL ){
+		log_write( LOG_ERR, "file output requires output-dir and output-file to be set" );
+		return NULL;
+	}
 
 	file_output_t *ret = mmt_alloc( sizeof( file_output_t) );
 	ret->file          = NULL;

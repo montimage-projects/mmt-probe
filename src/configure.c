@@ -414,7 +414,7 @@ static inline char * _cfg_get_str( cfg_t *cfg, const char *header ){
 
 static inline char * _cfg_get_dir( cfg_t *cfg, const char *header ){
 	const char *str = cfg_getstr( cfg, header );
-	if (str == NULL)
+	if (str == NULL || *str == '\0')
 		return NULL;
 	size_t len = strlen( str );
 	//ensure that a directory path is always end by '/'
@@ -1443,10 +1443,48 @@ void conf_release( probe_conf_t *conf){
 	mmt_probe_free( conf );
 }
 
+/**
+ * Check that a string option required by an enabled block is set (non-NULL,
+ * non-empty). File/dir/descriptor options default to NULL and are passed to
+ * strlen(), strcpy() or scandir() without a check (file_output, pcap_dump,
+ * reconstruction, sockets): the probe must reject the configuration at
+ * start-up instead of crashing on the first use.
+ * @param block the configuration block name, e.g., "file-output"
+ * @param key   the option inside it, e.g., "output-file"
+ * @param value its configured value
+ * @return 1 when the option is missing (an error was logged), 0 otherwise
+ */
+static inline int _missing_conf_str( const char *block, const char *key, const char *value ){
+	if( value != NULL && *value != '\0' )
+		return 0;
+	log_write( LOG_ERR, "%s.enable=true requires %s.%s to be set", block, block, key );
+	return 1;
+}
+
 int conf_validate( probe_conf_t *conf ){
 	int ret = 0;
 	if( conf->outputs.mongodb ){
 	}
+
+	if( conf->outputs.file->is_enable ){
+		ret += _missing_conf_str( "file-output", "output-file", conf->outputs.file->filename );
+		ret += _missing_conf_str( "file-output", "output-dir",  conf->outputs.file->directory );
+	}
+#ifdef SOCKET_MODULE
+	if( conf->outputs.socket->is_enable ){
+		if( conf->outputs.socket->socket_type == SOCKET_TYPE_ANY
+		 || conf->outputs.socket->socket_type == SOCKET_TYPE_UNIX )
+			ret += _missing_conf_str( "socket-output", "descriptor", conf->outputs.socket->unix_socket_descriptor );
+		if( conf->outputs.socket->socket_type == SOCKET_TYPE_ANY
+		 || conf->outputs.socket->socket_type == SOCKET_TYPE_TCP
+		 || conf->outputs.socket->socket_type == SOCKET_TYPE_UDP )
+			ret += _missing_conf_str( "socket-output", "hostname", conf->outputs.socket->internet_socket.host_name );
+	}
+#endif
+#ifdef DYNAMIC_CONFIG_MODULE
+	if( conf->dynamic_conf->is_enable )
+		ret += _missing_conf_str( "dynamic-config", "descriptor", conf->dynamic_conf->descriptor );
+#endif
 
 	if( conf->reports.microflow ){
 		if( conf->reports.microflow->report_bytes_count == 0)
@@ -1458,6 +1496,10 @@ int conf_validate( probe_conf_t *conf ){
 	if( conf->reports.pcap_dump ){
 		if( conf->reports.pcap_dump->frequency == 0 )
 			conf->reports.pcap_dump->frequency = 3600;
+#ifdef PCAP_DUMP_MODULE
+		if( conf->reports.pcap_dump->is_enable )
+			ret += _missing_conf_str( "dump-pcap", "output-dir", conf->reports.pcap_dump->directory );
+#endif
 	}
 
 	if( conf->reports.session->is_enable ){
@@ -1476,6 +1518,8 @@ int conf_validate( probe_conf_t *conf ){
 			log_write( LOG_ERR, "behaviour.enable=true requires system-report.enable=true");
 			ret ++;
 		}
+		ret += _missing_conf_str( "behaviour", "output-file", conf->reports.behaviour->filename );
+		ret += _missing_conf_str( "behaviour", "output-dir",  conf->reports.behaviour->directory );
 	}
 
 #ifdef TCP_REASSEMBLY_MODULE
@@ -1486,16 +1530,22 @@ int conf_validate( probe_conf_t *conf ){
 #endif
 
 #ifdef FTP_RECONSTRUCT_MODULE
-	if( ! conf->is_enable_tcp_reassembly && conf->reconstructions.ftp->is_enable){
-		log_write( LOG_ERR, "FTP data reconstruction needs to enable enable-tcp-reassembly=true" );
-		ret ++;
+	if( conf->reconstructions.ftp && conf->reconstructions.ftp->is_enable ){
+		ret += _missing_conf_str( "reconstruct-data.ftp", "output-dir", conf->reconstructions.ftp->directory );
+		if( ! conf->is_enable_tcp_reassembly ){
+			log_write( LOG_ERR, "FTP data reconstruction needs to enable enable-tcp-reassembly=true" );
+			ret ++;
+		}
 	}
 #endif
 
 #ifdef HTTP_RECONSTRUCT_MODULE
-	if( ! conf->is_enable_tcp_reassembly && conf->reconstructions.http->is_enable){
-		log_write( LOG_ERR, "HTTP data reconstruction needs to enable-tcp-reassembly=true" );
-		ret ++;
+	if( conf->reconstructions.http && conf->reconstructions.http->is_enable ){
+		ret += _missing_conf_str( "reconstruct-data.http", "output-dir", conf->reconstructions.http->directory );
+		if( ! conf->is_enable_tcp_reassembly ){
+			log_write( LOG_ERR, "HTTP data reconstruction needs to enable-tcp-reassembly=true" );
+			ret ++;
+		}
 	}
 #endif
 
