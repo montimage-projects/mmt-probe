@@ -190,6 +190,36 @@ test-errno-signal: --check-dpi-folder $(ERRNO_SIGNAL_TEST_BIN)
 	$(QUIET) status=0; $(ERRNO_SIGNAL_TEST_BIN) || status=$$?; \
 		$(RM) $(ERRNO_SIGNAL_TEST_OBJDIR) $(ERRNO_SIGNAL_TEST_BIN); exit $$status
 
+# Zero-length-key path of src/lib/hash.c (review #30/#31, note N3): an
+# occupied slot can legitimately hold {key_len = 0, key = NULL} - an empty
+# group-by makes mmt_memdup(msg, 0) return NULL - and hash_search must find
+# it without reaching memcmp, whose pointer arguments are declared nonnull.
+# Unlike the other drivers this one is built with UBSan as well as ASan: the
+# removed memcmp(key, NULL, 0) call was UB, so the test is red on the
+# unfixed hash.c and green on the fixed one. Its objects live under
+# test/hash/ so a parallel `make -j test` does not race the build in src/.
+HASH_TEST_DIR := $(TOP_DIR)/test/hash
+HASH_TEST_OBJDIR := $(HASH_TEST_DIR)/obj-asan-ubsan
+HASH_TEST_BIN  := $(HASH_TEST_DIR)/hash-test
+HASH_TEST_SRCS := $(HASH_TEST_DIR)/hash_test.c
+HASH_TEST_OBJS := $(addprefix $(HASH_TEST_OBJDIR)/, \
+	$(addsuffix .o, $(basename $(notdir $(HASH_TEST_SRCS)))))
+
+# -fno-sanitize-recover makes a UBSan report fatal, so the leg fails rather
+# than passing with a printed report on the unfixed code
+$(HASH_TEST_OBJS): $(HASH_TEST_OBJDIR)/%.o: $(HASH_TEST_DIR)/%.c
+	@mkdir -p $(HASH_TEST_OBJDIR)
+	$(QUIET) $(CC) $(CFLAGS) -fsanitize=address,undefined -fno-sanitize-recover=undefined -c -o $@ $<
+
+$(HASH_TEST_BIN): $(HASH_TEST_OBJS)
+	$(QUIET) $(CC) $(CLDFLAGS) -fsanitize=address,undefined -o $@ $^
+
+.PHONY: test-hash
+test-hash: $(HASH_TEST_BIN)
+	@echo "[TEST] hash zero-length key under ASan+UBSan"
+	$(QUIET) status=0; $(HASH_TEST_BIN) || status=$$?; \
+		$(RM) $(HASH_TEST_OBJDIR) $(HASH_TEST_BIN); exit $$status
+
 .PHONY: test
-test: test-stix test-report-overflow-stix test-snaplen test-crash test-report-overflow test-dynconf-reply test-online-signals test-errno-signal
+test: test-stix test-report-overflow-stix test-snaplen test-crash test-report-overflow test-dynconf-reply test-online-signals test-errno-signal test-hash
 	@:
