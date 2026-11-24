@@ -18,6 +18,14 @@
 
 #define MMT_USER_AGENT_THRESHOLD 0x20 //32KB
 
+//the maximal snap length accepted for a pcap capture: libpcap's own
+// maximum record size (MAXIMUM_SNAPLEN in pcap-int.h, what tcpdump's
+// "-s 0" resolves to). It bounds the snap-len values accepted from the
+// configuration file and -X overrides (input.snap-len,
+// dump-pcap.snap-len) and, in pcap_capture.c, the snap length honoured
+// from a savefile's header
+#define PCAP_FILE_SNAP_LEN_MAX 262144
+
 typedef struct multi_thread_conf_struct{
 	uint16_t thread_count;
 	uint32_t thread_queue_packet_threshold;
@@ -77,7 +85,7 @@ typedef struct input_source_conf_struct{
 
 	//input source for PCAP online mode (interface name) and for offline mode (pcap name), however for DPDK its interface port number
 	char *input_source;
-	uint16_t snap_len;    //pcap param
+	uint32_t snap_len;    //pcap param
 	uint32_t buffer_size; //pcap param
 	uint32_t timeout;     //pcap param
 	char *pcap_filter;    //https://www.tcpdump.org/manpages/pcap-filter.7.html
@@ -177,7 +185,7 @@ typedef struct pcap_dump_conf_struct{
 	uint16_t retained_files_count; //retains the last x sampled files,
 									//set to 0 to retain all files
 									// ( note that the value of retain-files must be greater than the value of thread_nb + 1)
-	uint16_t snap_len;
+	uint32_t snap_len;
 }pcap_dump_conf_t;
 
 typedef struct reconstruct_data_conf_struct{
@@ -400,6 +408,14 @@ size_t conf_parse_list( const char *string, char ***proto_lst );
 int conf_validate( probe_conf_t *conf );
 
 bool conf_parse_input_mode( int *result, const char *string );
+
+/**
+ * Parse a snap-len value: digits only, from 0 to PCAP_FILE_SNAP_LEN_MAX.
+ * @param result receives the parsed value
+ * @param value
+ * @return false when value is not a number inside the accepted range
+ */
+bool conf_parse_snap_len( uint32_t *result, const char *value );
 bool conf_parse_rtt_base(int *result, const char *value);
 bool conf_parse_security_ignore_mode(int *result, const char *value);
 bool conf_parse_output_socket_type(int *result, const char *value);

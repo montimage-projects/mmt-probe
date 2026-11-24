@@ -1239,7 +1239,7 @@ probe-id = 3                    # Unique identifier for this probe
 input {
     mode = ONLINE               # ONLINE for live capture, OFFLINE for pcap files
     source = "eth0"             # Interface name or pcap file path
-    snap-len = 0                # Max packet size (0 = 65535)
+    snap-len = 0                # Bytes kept per packet, 0-262144 (0 = savefile's snaplen offline, 65535 online)
     buffer-size = 4096          # Capture buffer size in bytes
     timeout = 1000              # Capture timeout in milliseconds
 }

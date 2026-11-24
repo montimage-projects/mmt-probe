@@ -2,13 +2,17 @@
 # INTEGRATION CHECKS                                #
 #####################################################
 
-# Integration check of the PCAP snap-len/worker-ring sizing (issue #1).
+# Integration check of the PCAP snap-len/worker-ring sizing (issue #1) and
+# of the input.snap-len value handling (issue #5).
 # Runs ./probe over generated captures (1500-B and 64-B frames, plus one
 # declaring a snap length of 0x7FFFFFFF) for each snap-len in {0, 64, 65535}
 # and each thread-nb in {1, 2}, asserting every packet is processed, no run
 # crashes, and the file-declared snap length cannot grow the rings past
-# 262144. Needs a built probe and python3; the captures are written under
-# a temporary directory.
+# 262144. Configured values of 65536 and 262144 must be taken as-is rather
+# than wrapped, out-of-range and malformed values must be rejected with a
+# clear error and a non-zero exit, and a live capture (default interface:
+# lo) must reach pcap_set_snaplen with the configured value. Needs a built
+# probe and python3; the captures are written under a temporary directory.
 SNAPLEN_TEST_DIR := $(TOP_DIR)/test/pcap-snaplen
 
 .PHONY: test-snaplen
