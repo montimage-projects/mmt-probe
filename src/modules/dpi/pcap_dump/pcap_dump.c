@@ -56,7 +56,7 @@ struct pd_pcap_pkthdr {
 
 
 
-static inline bool _write_packet( FILE *fd, const char * buf, uint16_t len, uint16_t caplen, const struct timeval *tv) {
+static inline bool _write_packet( FILE *fd, const char * buf, uint32_t len, uint32_t caplen, const struct timeval *tv) {
     struct pd_pcap_pkthdr h;
 
     h.ts.tv_sec  = (uint32_t)tv->tv_sec;
@@ -76,7 +76,7 @@ static inline bool _write_packet( FILE *fd, const char * buf, uint16_t len, uint
     return true;
 }
 
-FILE * _create_pcap_file(const char * path, int linktype, int thiszone, uint16_t snaplen) {
+FILE * _create_pcap_file(const char * path, int linktype, int thiszone, uint32_t snaplen) {
 	//open file for writing
     FILE *file = fopen( path, "w" );
     if (file == NULL)
