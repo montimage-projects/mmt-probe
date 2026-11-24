@@ -175,7 +175,7 @@ void *hash_search( const hash_t *hash, size_t key_len, const void *key ){
 	//find an available slot
 	while( hash->items[ index ].is_occupy ){
 		if( hash->items[ index ].key_len == key_len
-		&& memcmp(key, hash->items[index].key, key_len) == 0 )
+		&& ( key_len == 0 || memcmp(key, hash->items[index].key, key_len) == 0 ))
 			return hash->items[ index ].data;
 
 		//go to the next slot
