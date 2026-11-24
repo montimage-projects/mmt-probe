@@ -244,6 +244,9 @@ check_reports() {
 # monitor's own "Received signal <n>. Stopping MMT-Probe ..." line shares
 # a report fragment, so it is whitelisted below beside the reports.
 check_signal_lines() {
+	#a missing or empty log must fail too: grep would print an error and
+	# leave nb_frag/nb_whole empty, and "" = "" would pass vacuously below
+	[ -s "$2" ] || { bad "$1: no signal log line found"; return 1; }
 	nb_frag=$(grep -c \
 		-e "Received SIG" -e "Received signal" -e "releasing resource" \
 		-e "Exit dynamic configuration server" -e "while processing other one" \

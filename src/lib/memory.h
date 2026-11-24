@@ -20,16 +20,11 @@
 #include "tools.h"
 
 static ALWAYS_INLINE void assign_16bytes( void *dest, const void *source){
-	const uint64_t *s = (uint64_t *)source;
-	uint64_t *d = (uint64_t *)dest;
-	d[0] = s[0];
-	d[1] = s[1];
+	memcpy( dest, source, 16 );
 }
 
 static ALWAYS_INLINE void assign_8bytes( void *dest, const void *source){
-	const uint64_t *s = (uint64_t *)source;
-	uint64_t *d = (uint64_t *)dest;
-	d[0] = s[0];
+	memcpy( dest, source, 8 );
 }
 
 /**
@@ -39,23 +34,15 @@ static ALWAYS_INLINE void assign_8bytes( void *dest, const void *source){
  */
 
 static ALWAYS_INLINE void assign_6bytes( void *dest, const void *source){
-	const uint16_t *s = (uint16_t *)source;
-	uint16_t *d = (uint16_t *)dest;
-	d[0] = s[0];
-	d[1] = s[1];
-	d[2] = s[2];
+	memcpy( dest, source, 6 );
 }
 
 static ALWAYS_INLINE void assign_4bytes( void *dest, const void *source){
-	const uint32_t *s = (uint32_t *)source;
-	uint32_t *d = (uint32_t *)dest;
-	d[0] = s[0];
+	memcpy( dest, source, 4 );
 }
 
 static ALWAYS_INLINE void assign_2bytes( void *dest, const void *source){
-	const uint16_t *s = (uint16_t *)source;
-	uint16_t *d = (uint16_t *)dest;
-	d[0] = s[0];
+	memcpy( dest, source, 2 );
 }
 
 #endif /* SRC_LIB_MEMORY_H_ */
