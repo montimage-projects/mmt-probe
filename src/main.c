@@ -278,14 +278,12 @@ static volatile sig_atomic_t first_crash_signal = 0;
  */
 static void _report_crash_signal( int sig ){
 	static const char prefix[] = "mmt-probe: crash signal received: ";
-	char msg[ sizeof( prefix ) + 4 ];
+	char msg[ sizeof( prefix ) - 1 + 10 + 1 ];
 	size_t i = 0;
 	for( const char *c = prefix; *c != '\0'; c ++ )
 		msg[ i++ ] = *c;
 	//append the signal number: snprintf() is not async-signal-safe
-	if( sig > 99 ) msg[ i++ ] = '0' + ( sig / 100 ) % 10;
-	if( sig > 9  ) msg[ i++ ] = '0' + ( sig / 10 ) % 10;
-	msg[ i++ ] = '0' + sig % 10;
+	i += append_uint_dec( msg + i, sig );
 	msg[ i++ ] = '\n';
 	//best effort: nothing sensible to do if the write fails
 	if( write( STDERR_FILENO, msg, i ) < 0 ){}
@@ -303,12 +301,24 @@ static void _report_crash_signal( int sig ){
  * handled). Only write() to stderr is used, as in _report_crash_signal().
  * The text keeps the "Received SIG<name>" markers the logger produced.
  */
-static void _report_termination_signal( const char *name, size_t name_len ){
+static void _report_termination_signal( const char *name ){
 	static const char prefix[] = "mmt-probe: Received SIG";
 	static const char suffix[] = ". Main processing process is releasing resource ...\n";
-	if( write( STDERR_FILENO, prefix, sizeof( prefix ) - 1 ) < 0 ){}
-	if( write( STDERR_FILENO, name, name_len ) < 0 ){}
-	if( write( STDERR_FILENO, suffix, sizeof( suffix ) - 1 ) < 0 ){}
+	//the whole line is composed in one buffer and emitted by a single
+	// write(): several writes could interleave on the shared descriptor
+	// with the report of another process signalled at the same instant
+	// (a group-wide kill) and break the markers docker-logs scrapers match
+	char msg[ sizeof( prefix ) - 1 + 8 + sizeof( suffix ) - 1 ];
+	size_t i = 0;
+	const char *c;
+	for( c = prefix; *c != '\0'; c ++ )
+		msg[ i++ ] = *c;
+	//a signal name is a few characters; the buffer leaves room for 8
+	for( c = name; *c != '\0' && c - name < 8; c ++ )
+		msg[ i++ ] = *c;
+	for( c = suffix; *c != '\0'; c ++ )
+		msg[ i++ ] = *c;
+	if( write( STDERR_FILENO, msg, i ) < 0 ){}
 }
 
 /**
@@ -318,15 +328,16 @@ static void _report_termination_signal( const char *name, size_t name_len ){
 static void _report_second_signal( int sig ){
 	static const char prefix[] = "mmt-probe: Received signal ";
 	static const char suffix[] = " while processing other one. Exit immediately.\n";
-	char num[ 4 ];
+	//one buffer, one write(): see _report_termination_signal()
+	char msg[ sizeof( prefix ) - 1 + 10 + sizeof( suffix ) - 1 ];
 	size_t i = 0;
-	//append the signal number: snprintf() is not async-signal-safe
-	if( sig > 99 ) num[ i++ ] = '0' + ( sig / 100 ) % 10;
-	if( sig > 9  ) num[ i++ ] = '0' + ( sig / 10 ) % 10;
-	num[ i++ ] = '0' + sig % 10;
-	if( write( STDERR_FILENO, prefix, sizeof( prefix ) - 1 ) < 0 ){}
-	if( write( STDERR_FILENO, num, i ) < 0 ){}
-	if( write( STDERR_FILENO, suffix, sizeof( suffix ) - 1 ) < 0 ){}
+	const char *c;
+	for( c = prefix; *c != '\0'; c ++ )
+		msg[ i++ ] = *c;
+	i += append_uint_dec( msg + i, sig );
+	for( c = suffix; *c != '\0'; c ++ )
+		msg[ i++ ] = *c;
+	if( write( STDERR_FILENO, msg, i ) < 0 ){}
 }
 
 /**
@@ -365,14 +376,14 @@ void signal_handler(int type) {
 
 	switch( type ){
 	case SIGINT:
-		_report_termination_signal( "INT", 3 );
+		_report_termination_signal( "INT" );
 		context->is_exiting = true;
 
 		_stop_modules( context );
 		break;
 
 	case SIGTERM:
-		_report_termination_signal( "TERM", 4 );
+		_report_termination_signal( "TERM" );
 		context->is_exiting = true;
 
 		_stop_modules( context );

@@ -235,6 +235,57 @@ check_reports() {
 	fi
 }
 
+# check_signal_lines <name> <log>: every line carrying a fragment of a
+# signal report must be one whole report. The handler composes its
+# message in one buffer and emits it in a single write(), so concurrent
+# reports from the two children cannot interleave their parts inside a
+# line; a fragment-holding line that is not a complete report means the
+# writes of two processes interleaved on the shared descriptor. The
+# monitor's own "Received signal <n>. Stopping MMT-Probe ..." line shares
+# a report fragment, so it is whitelisted below beside the reports.
+check_signal_lines() {
+	nb_frag=$(grep -c \
+		-e "Received SIG" -e "Received signal" -e "releasing resource" \
+		-e "Exit dynamic configuration server" -e "while processing other one" \
+		-e "Segv signal received" -e "crash signal received" \
+		-e "Abort signal received" -e "Restart signal received" \
+		-e "Cleaning up before" "$2" || true)
+	nb_whole=$(grep -cx \
+		-e "mmt-probe: Received SIGINT\. Main processing process is releasing resource \.\.\." \
+		-e "mmt-probe: Received SIGTERM\. Main processing process is releasing resource \.\.\." \
+		-e "mmt-probe: Received signal [0-9]*\. Exit dynamic configuration server\." \
+		-e "mmt-probe: Received signal [0-9]* while processing other one\. Exit immediately\." \
+		-e "mmt-probe: Received signal [0-9]*\. Stopping MMT-Probe \.\.\." \
+		-e "mmt-probe: Segv signal received on control process!" \
+		-e "mmt-probe: crash signal received: [0-9]*" \
+		-e "mmt-probe: Abort signal received! Cleaning up before exiting!" \
+		-e "mmt-probe: Restart signal received! Cleaning up before restarting!" \
+		"$2" || true)
+	if [ "$nb_frag" = "$nb_whole" ]; then
+		pass "$1: $nb_whole signal log line(s) whole"
+		return 0
+	fi
+	bad "$1: $((nb_frag - nb_whole)) of $nb_frag signal log line(s) interleaved:"
+	grep \
+		-e "Received SIG" -e "Received signal" -e "releasing resource" \
+		-e "Exit dynamic configuration server" -e "while processing other one" \
+		-e "Segv signal received" -e "crash signal received" \
+		-e "Abort signal received" -e "Restart signal received" \
+		-e "Cleaning up before" "$2" \
+	| grep -vx \
+		-e "mmt-probe: Received SIGINT\. Main processing process is releasing resource \.\.\." \
+		-e "mmt-probe: Received SIGTERM\. Main processing process is releasing resource \.\.\." \
+		-e "mmt-probe: Received signal [0-9]*\. Exit dynamic configuration server\." \
+		-e "mmt-probe: Received signal [0-9]* while processing other one\. Exit immediately\." \
+		-e "mmt-probe: Received signal [0-9]*\. Stopping MMT-Probe \.\.\." \
+		-e "mmt-probe: Segv signal received on control process!" \
+		-e "mmt-probe: crash signal received: [0-9]*" \
+		-e "mmt-probe: Abort signal received! Cleaning up before exiting!" \
+		-e "mmt-probe: Restart signal received! Cleaning up before restarting!" \
+	| sed 's/^/    log: /'
+	return 1
+}
+
 # run_shutdown <sig> <name>: one online run ended by <sig> sent to the
 # supervisor. Asserts: exit within a few seconds with status 0, the child
 # exited 0 ("return code: 0"), the shutdown path ran and reports flushed.
@@ -502,6 +553,7 @@ if [ "$can_capture" -eq 1 ] \
 			if [ "$RC" != -1 ]; then
 				check "$name status" 0 "$RC"
 				no_orphans "$sup_pid" "$kid" "$ctl_pid"
+				check_signal_lines "$name" "$logf"
 			fi
 		fi
 		rep=$((rep + 1))

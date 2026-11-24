@@ -52,6 +52,28 @@ static ALWAYS_INLINE int mmt_atoi( const char*string, int low, int high, int def
 }
 
 /**
+ * Append the decimal digits of a non-negative integer to @buf, which must
+ * have room for at most 10 digits (a 32-bit value has at most 10).
+ * Only arithmetic is used - no library call - so, unlike snprintf(), this
+ * is async-signal-safe and can format a number inside a signal handler.
+ * @param buf
+ * @param val
+ * @return the number of bytes appended to @buf
+ */
+static ALWAYS_INLINE size_t append_uint_dec( char *buf, unsigned int val ){
+	//the digits come out least-significant first: collect, then reverse
+	char tmp[ 10 ];
+	size_t nb = 0, i;
+	do{
+		tmp[ nb++ ] = '0' + val % 10;
+		val /= 10;
+	}while( val != 0 );
+	for( i = 0; i < nb; i++ )
+		buf[ i ] = tmp[ nb - 1 - i ];
+	return nb;
+}
+
+/**
  * Get interval, in micro seconds, between two timeval moments
  * @param end
  * @param start

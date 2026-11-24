@@ -440,6 +440,10 @@ static inline void _processing( int sock ) {
 // repeat or a different, forwarded one - must exit it immediately (same
 // convention as signal_handler() in src/main.c)
 static volatile sig_atomic_t server_stop_signal = 0;
+//the first crash signal received: if the crash reporter itself faults, the
+// handler is re-entered - the process must then still die by the first
+// signal (same convention as first_crash_signal in src/main.c)
+static volatile sig_atomic_t first_crash_signal = 0;
 
 /**
  * Report a termination signal from inside _signal_handler(), where the
@@ -453,15 +457,19 @@ static volatile sig_atomic_t server_stop_signal = 0;
 static void _report_termination_signal( int sig ){
 	static const char prefix[] = "mmt-probe: Received signal ";
 	static const char suffix[] = ". Exit dynamic configuration server.\n";
-	char num[ 4 ];
+	//the whole line is composed in one buffer and emitted by a single
+	// write(): several writes could interleave on the shared descriptor
+	// with the report of another process signalled at the same instant
+	// (a group-wide kill) and break the markers docker-logs scrapers match
+	char msg[ sizeof( prefix ) - 1 + 10 + sizeof( suffix ) - 1 ];
 	size_t i = 0;
-	//append the signal number: snprintf() is not async-signal-safe
-	if( sig > 99 ) num[ i++ ] = '0' + ( sig / 100 ) % 10;
-	if( sig > 9  ) num[ i++ ] = '0' + ( sig / 10 ) % 10;
-	num[ i++ ] = '0' + sig % 10;
-	if( write( STDERR_FILENO, prefix, sizeof( prefix ) - 1 ) < 0 ){}
-	if( write( STDERR_FILENO, num, i ) < 0 ){}
-	if( write( STDERR_FILENO, suffix, sizeof( suffix ) - 1 ) < 0 ){}
+	const char *c;
+	for( c = prefix; *c != '\0'; c ++ )
+		msg[ i++ ] = *c;
+	i += append_uint_dec( msg + i, sig );
+	for( c = suffix; *c != '\0'; c ++ )
+		msg[ i++ ] = *c;
+	if( write( STDERR_FILENO, msg, i ) < 0 ){}
 }
 
 /**
@@ -471,15 +479,16 @@ static void _report_termination_signal( int sig ){
 static void _report_second_signal( int sig ){
 	static const char prefix[] = "mmt-probe: Received signal ";
 	static const char suffix[] = " while processing other one. Exit immediately.\n";
-	char num[ 4 ];
+	//one buffer, one write(): see _report_termination_signal()
+	char msg[ sizeof( prefix ) - 1 + 10 + sizeof( suffix ) - 1 ];
 	size_t i = 0;
-	//append the signal number: snprintf() is not async-signal-safe
-	if( sig > 99 ) num[ i++ ] = '0' + ( sig / 100 ) % 10;
-	if( sig > 9  ) num[ i++ ] = '0' + ( sig / 10 ) % 10;
-	num[ i++ ] = '0' + sig % 10;
-	if( write( STDERR_FILENO, prefix, sizeof( prefix ) - 1 ) < 0 ){}
-	if( write( STDERR_FILENO, num, i ) < 0 ){}
-	if( write( STDERR_FILENO, suffix, sizeof( suffix ) - 1 ) < 0 ){}
+	const char *c;
+	for( c = prefix; *c != '\0'; c ++ )
+		msg[ i++ ] = *c;
+	i += append_uint_dec( msg + i, sig );
+	for( c = suffix; *c != '\0'; c ++ )
+		msg[ i++ ] = *c;
+	if( write( STDERR_FILENO, msg, i ) < 0 ){}
 }
 
 /**
@@ -533,7 +542,12 @@ static void _signal_handler( int type ){
 		break;
 
 	case SIGSEGV:
-		_report_crash_signal();
+		//a nested crash while reporting skips the report and dies by the
+		// first signal - the reporter itself may fault on a corrupted stack
+		if( first_crash_signal == 0 ){
+			first_crash_signal = type;
+			_report_crash_signal();
+		}
 
 		//Auto restart when segmentation fault
 		EXIT_TOBE_RESTARTED();
