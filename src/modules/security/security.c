@@ -43,7 +43,42 @@
 #include "../../lib/string_builder.h"
 #include "../../lib/malloc_ext.h"
 
+#include <mmt_alloc.h>
+
 #define SECURITY_DPI_PACKET_HANDLER_ID 10
+
+/*
+ * message_t is declared __aligned (64 bytes) but libmmt_security's
+ * mmt_mem_alloc puts its mmt_memory_t header at the malloc base, so the
+ * returned data is at base + SIZE_OF_MMT_MEMORY_T (16) — never more than
+ * 16-aligned, and free() is called on that same base via
+ * mmt_mem_revert(x) = x - 16.
+ *
+ * libmmt_security is linked dynamically and probe exports its symbols,
+ * so the two definitions below interpose its allocator for every call
+ * site (create_message_t, clone_message_t, mmt_mem_dup, ...): the header
+ * is placed 48 bytes into a 64-aligned block so the returned data lands
+ * on a 64-byte boundary while keeping the x - 16 header contract;
+ * mmt_mem_force_free releases the real base at x - 64. A plain free() is
+ * correct for both paths. No realloc is ever applied to these blocks.
+ * With STATIC_LINK the library's own definitions are kept (duplicate
+ * symbols at link time); that build keeps the pre-existing misalignment.
+ */
+#ifndef STATIC_LINK
+void *mmt_mem_alloc( size_t size ){
+	//header sits 16 bytes before the data, which must be at offset 64
+	void *base = aligned_alloc( 64, (( 64 + size + 1 ) + 63 ) & ~(size_t) 63 );
+	mmt_assert( base != NULL, "Not enough memory to allocate %zu bytes", size );
+	mmt_memory_t *mem = (mmt_memory_t *)( (uint8_t *) base + 48 );
+	mmt_mem_reset( mem, size );
+	return mem->data;
+}
+
+void mmt_mem_force_free( void *x ){
+	if( x != NULL )
+		free( (uint8_t *) x - 64 );
+}
+#endif
 
 #define IS_CFG_INOGRE( x ) (x->config->ignore_remain_flow )
 
