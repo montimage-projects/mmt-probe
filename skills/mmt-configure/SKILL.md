@@ -344,7 +344,7 @@ dump-pcap {
     protocols = {"unknown"}  # Protocols to dump
     period = 60              # New file every N seconds
     retain-files = 50
-    snap-len = 65355         # Bytes per packet in the dumped files, 0-262144; 0 writes header-only records (MIN(caplen, 0)) and is the compiled default
+    snap-len = 65535         # Bytes per packet in the dumped files, 0-262144; 0 writes header-only records (MIN(caplen, 0)) and is the compiled default
 }
 ```
 
