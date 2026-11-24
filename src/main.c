@@ -292,10 +292,44 @@ static void _report_crash_signal( int sig ){
 }
 
 /**
+ * Report a termination signal from inside a signal handler, where the
+ * logger - syslog - cannot be used: it is not async-signal-safe and a
+ * signal interrupting it inside a lock would deadlock the drain (the
+ * monitor's forwarded signal can arrive while a previous one is being
+ * handled). Only write() to stderr is used, as in _report_crash_signal().
+ * The text keeps the "Received SIG<name>" markers the logger produced.
+ */
+static void _report_termination_signal( const char *name, size_t name_len ){
+	static const char prefix[] = "mmt-probe: Received SIG";
+	static const char suffix[] = ". Main processing process is releasing resource ...\n";
+	if( write( STDERR_FILENO, prefix, sizeof( prefix ) - 1 ) < 0 ){}
+	if( write( STDERR_FILENO, name, name_len ) < 0 ){}
+	if( write( STDERR_FILENO, suffix, sizeof( suffix ) - 1 ) < 0 ){}
+}
+
+/**
+ * Report a second signal from inside a signal handler - the process then
+ * exits immediately. write() only, for the same reason as above.
+ */
+static void _report_second_signal( int sig ){
+	static const char prefix[] = "mmt-probe: Received signal ";
+	static const char suffix[] = " while processing other one. Exit immediately.\n";
+	char num[ 4 ];
+	size_t i = 0;
+	//append the signal number: snprintf() is not async-signal-safe
+	if( sig > 99 ) num[ i++ ] = '0' + ( sig / 100 ) % 10;
+	if( sig > 9  ) num[ i++ ] = '0' + ( sig / 10 ) % 10;
+	num[ i++ ] = '0' + sig % 10;
+	if( write( STDERR_FILENO, prefix, sizeof( prefix ) - 1 ) < 0 ){}
+	if( write( STDERR_FILENO, num, i ) < 0 ){}
+	if( write( STDERR_FILENO, suffix, sizeof( suffix ) - 1 ) < 0 ){}
+}
+
+/**
  * This signal handler ensures clean exits.
- * Note: calling printf() from a signal handler is not safe since printf() is not async-signal-safe.
- *      Nevertheless, MMT-Probe will exit at the end of executing signal_handler(), thus we do not need
- *      to care about the restore point of signal_handler.
+ * Note: calling printf() from a signal handler is not safe since printf() is not async-signal-safe,
+ *      and neither is the logger (syslog): they are not used here - only write() to stderr and
+ *      pcap_breakloop(), which libpcap documents as signal-handler-safe.
  */
 void signal_handler(int type) {
 	//remember signal type in order to restart its process
@@ -318,21 +352,23 @@ void signal_handler(int type) {
 				}
 				EXIT_BY_SIGNAL( first_crash_signal );
 			}
-		log_write(LOG_ERR, "Received signal %d while processing other one. Exit immediately.", type );
-		fflush( stdout );
+		//a second termination signal asks to exit right now - e.g., a
+		// group-wide kill plus the monitor's forward - without touching the
+		// logger, which the interrupted code may hold a lock of
+		_report_second_signal( type );
 		EXIT_NORMALLY();
 	}
 
 	switch( type ){
 	case SIGINT:
-		log_write(LOG_INFO, "Received SIGINT. Main processing process is releasing resource ...");
+		_report_termination_signal( "INT", 3 );
 		context->is_exiting = true;
 
 		_stop_modules( context );
 		break;
 
 	case SIGTERM:
-		log_write(LOG_INFO, "Received SIGTERM. Main processing process is releasing resource ...");
+		_report_termination_signal( "TERM", 4 );
 		context->is_exiting = true;
 
 		_stop_modules( context );
@@ -373,12 +409,18 @@ void signal_handler(int type) {
 			}
 			EXIT_BY_SIGNAL( first_crash_signal );
 		}else{
-			log_write(LOG_ERR, "Abort signal received! Cleaning up before exiting!");
+			static const char abort_msg[] =
+				"mmt-probe: Abort signal received! Cleaning up before exiting!\n";
+			if( write( STDERR_FILENO, abort_msg, sizeof( abort_msg ) - 1 ) < 0 ){}
 			EXIT_NO_RESTART();
 		}
 		break;
 	case SIGRES:
-		log_write(LOG_ERR, "Restart signal received! Cleaning up before restarting!");
+		{
+			static const char restart_msg[] =
+				"mmt-probe: Restart signal received! Cleaning up before restarting!\n";
+			if( write( STDERR_FILENO, restart_msg, sizeof( restart_msg ) - 1 ) < 0 ){}
+		}
 		_stop_modules( context );
 	}
 }
