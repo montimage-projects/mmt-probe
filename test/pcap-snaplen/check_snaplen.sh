@@ -296,6 +296,8 @@ done
 # length is exactly the configured one
 for threads in $THREAD_NBS; do
 	run_one "$WORK_DIR/hugesnap.pcap" 65536 "$threads" "$PACKETS" "$MEM_LIMIT_KB" "$SNAP_CAP" 65536
+	#s262144 also passes on the base build: a 262144 -> 0 wrap resolves to
+	# the file's capped 262144, so s65536 above is the real no-wrap check
 	run_one "$WORK_DIR/hugesnap.pcap" "$SNAP_CAP" "$threads" "$PACKETS" "$MEM_LIMIT_KB" "$SNAP_CAP" "$SNAP_CAP"
 done
 
