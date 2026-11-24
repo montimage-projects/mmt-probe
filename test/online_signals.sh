@@ -261,6 +261,12 @@ check_signal_lines() {
 		-e "mmt-probe: Abort signal received! Cleaning up before exiting!" \
 		-e "mmt-probe: Restart signal received! Cleaning up before restarting!" \
 		"$2" || true)
+	#a log without any fragment would pass the equality below vacuously:
+	# zero signal lines means the run produced nothing to check
+	if [ "$nb_frag" -eq 0 ]; then
+		bad "$1: no signal log line found"
+		return 1
+	fi
 	if [ "$nb_frag" = "$nb_whole" ]; then
 		pass "$1: $nb_whole signal log line(s) whole"
 		return 0
