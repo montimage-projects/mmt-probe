@@ -67,6 +67,16 @@ test-report-overflow: --check-dpi-folder $(REPORT_OVERFLOW_TEST_BIN)
 	$(QUIET) status=0; $(REPORT_OVERFLOW_TEST_BIN) || status=$$?; \
 		$(RM) $(REPORT_OVERFLOW_TEST_OBJDIR) $(REPORT_OVERFLOW_TEST_BIN); exit $$status
 
+# Online-mode signal handling and exit statuses (issues #7 and #10): the
+# supervisor forwards SIGTERM/SIGINT to the processing child and exits
+# with its status; a start-up error reports the do-not-restart status and
+# is not restarted; a SIGSEGV still restarts the child. The probe must be
+# able to capture on the loopback interface (CAP_NET_RAW).
+.PHONY: test-online-signals
+test-online-signals: compile
+	@echo "[TEST] online signal forwarding"
+	$(QUIET) sh $(TOP_DIR)/test/online_signals.sh
+
 .PHONY: test
-test: test-snaplen test-crash test-report-overflow
+test: test-snaplen test-crash test-report-overflow test-online-signals
 	@:

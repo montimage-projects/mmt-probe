@@ -112,8 +112,19 @@ void dynamic_conf_check(){
 }
 
 pid_t dynamcic_conf_create_new_process_to_receive_command( const char * unix_socket_domain_descriptor_name, void (*clean_resource)() ){
+	//the child inherits the monitor's flag-only handler until it resets its
+	// dispositions: a forwarded signal caught in between would just set the
+	// flag in the child - which never reads it. Blocking the signals around
+	// the fork makes the child inherit the blocked mask, so a signal stays
+	// pending until the child's reset is done (same as in main.c).
+	sigset_t block_set, prev_set;
+	sigemptyset( &block_set );
+	sigaddset( &block_set, SIGINT );
+	sigaddset( &block_set, SIGTERM );
+	sigprocmask( SIG_BLOCK, &block_set, &prev_set );
 	//duplicate the current process into 2 different processes
 	pid_t child_pid = fork();
+	sigprocmask( SIG_SETMASK, &prev_set, NULL );
 
 	if( child_pid < 0 ) {
 		ABORT( "Fork error: %s", strerror(errno) );
@@ -121,7 +132,13 @@ pid_t dynamcic_conf_create_new_process_to_receive_command( const char * unix_soc
 	}
 
 	if (child_pid == 0) {
-		//we are in child process
+		//we are in child process: the monitor's dispositions were inherited -
+		// reset them so a forwarded signal kills this child by default until
+		// the server installs its own handlers
+		signal( SIGINT,  SIG_DFL );
+		signal( SIGTERM, SIG_DFL );
+		sigprocmask( SIG_SETMASK, &prev_set, NULL );
+
 		log_write( LOG_INFO, "Create a new sub-process %d for dynamic configuration server", getpid() );
 		dynamic_conf_server_start_processing( unix_socket_domain_descriptor_name );
 
