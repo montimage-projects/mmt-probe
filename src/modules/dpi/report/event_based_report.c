@@ -35,11 +35,8 @@ static int _process_ieee802154_src_dst( char *msg, int length, uint32_t proto_id
 	if( att_id != IEEE802154_SRC_ADDRESS_EXTENDED && att_id != IEEE802154_DST_ADDRESS_EXTENDED)
 		return 0;
 	//no data => use empty string
-	if( data == NULL || data->data == NULL){
-		msg[0] = '"';
-		msg[1] = '"';
-		return 2; //2 characters have been added to msg
-	}
+	if( data == NULL || data->data == NULL)
+		return bounded_snprintf_len( length, snprintf( msg, length, "\"\"" ) );
 
 	uint8_t *add = (uint8_t *) data->data;
 

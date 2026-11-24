@@ -17,8 +17,20 @@
 #include <assert.h>
 #include <stdio.h>
 #include <string.h>
+#include <unistd.h>
+
+//only the file and stdout channels are exercised by this driver: compile the
+//optional output channels out so the binary does not need their libraries
+#undef KAFKA_MODULE
+#undef MONGODB_MODULE
+#undef REDIS_MODULE
+#undef MQTT_MODULE
+#undef SOCKET_MODULE
 
 #include "../../src/lib/limit.h"
+#include "../../src/modules/output/file/file_output.c"
+#include "../../src/modules/output/output.c"
+#include "../../src/modules/dpi/report/event_based_report.c"
 #include "../../src/modules/dpi/report/session_report_rtp.c"
 #include "../../src/modules/dpi/report/session_report_gtp.c"
 
@@ -115,11 +127,87 @@ static void test_gtp_report_complete( void ){
 	assert( strcmp( message, "\"8.8.8.8\",\"8.4.4.8\",[1234,5678]" ) == 0 );
 }
 
+//output._write surrounds a report by '[' and ']' to output it as JSON (or to
+//MongoDB): the wrap must fit a whole report, and a longer message must be
+//truncated rather than overflow new_msg
+static void test_output_json_wrap( void ){
+	file_output_conf_t file_conf;
+	memset( &file_conf, 0, sizeof( file_conf )); //file channel disabled
+
+	output_conf_t conf;
+	memset( &conf, 0, sizeof( conf ));
+	conf.is_enable = true;
+	conf.format    = OUTPUT_FORMAT_JSON;
+	conf.file      = &file_conf;
+
+	output_t *output = output_alloc_init( 0, &conf, 0, "test", false );
+	assert( output != NULL );
+
+	//the reports are written to stdout: send them to /dev/null to keep the
+	//output of this driver readable
+	FILE *devnull = fopen( "/dev/null", "w" );
+	assert( devnull != NULL );
+	fflush( stdout );
+	int stdout_copy = dup( fileno( stdout ));
+	int rc1 = dup2( fileno( devnull ), fileno( stdout ));
+	assert( stdout_copy >= 0 && rc1 >= 0 );
+
+	//a body of 3000, 2999 or 2998 bytes fills the report to its limit
+	char body[ MAX_LENGTH_REPORT_MESSAGE + 1 ];
+	memset( body, 'A', MAX_LENGTH_REPORT_MESSAGE );
+	struct timeval ts = { .tv_sec = 1234, .tv_usec = 0 };
+	int sizes[] = { MAX_LENGTH_REPORT_MESSAGE,
+			MAX_LENGTH_REPORT_MESSAGE - 1,
+			MAX_LENGTH_REPORT_MESSAGE - 2 };
+	int i;
+	for( i=0; i<3; i++ ){
+		body[ sizes[i] ] = '\0';
+		int ret = output_write_report( output, CONF_OUTPUT_CHANNEL_STDOUT,
+				DUMMY_REPORT_TYPE, &ts, body );
+		assert( ret == 1 );
+	}
+
+	fflush( stdout );
+	int rc2 = dup2( stdout_copy, fileno( stdout ));
+	assert( rc2 >= 0 );
+	close( stdout_copy );
+	fclose( devnull );
+
+	output_release( output );
+}
+
+//_process_ieee802154_src_dst wrote "" and returned 2 without looking at the
+//room left in the buffer: at a full report that wrote past the buffer and
+//moved the caller's offset out of bounds
+static void test_ieee802154_attr_truncated( void ){
+	char message[ MAX_LENGTH_REPORT_MESSAGE + 1 ];
+
+	//the report is exactly full: nothing may be written
+	int ret0 = _process_ieee802154_src_dst( message + MAX_LENGTH_REPORT_MESSAGE, 0,
+			PROTO_IEEE802154, IEEE802154_SRC_ADDRESS_EXTENDED, NULL );
+	assert( ret0 == 0 );
+
+	//room for the closing '\0' only
+	int ret1 = _process_ieee802154_src_dst( message + MAX_LENGTH_REPORT_MESSAGE, 1,
+			PROTO_IEEE802154, IEEE802154_DST_ADDRESS_EXTENDED, NULL );
+	assert( ret1 == 0 );
+	assert( message[ MAX_LENGTH_REPORT_MESSAGE ] == '\0' );
+
+	//a fitting buffer still gets ""
+	char buf[8];
+	int ret2 = _process_ieee802154_src_dst( buf, sizeof( buf ), PROTO_IEEE802154,
+			IEEE802154_SRC_ADDRESS_EXTENDED, NULL );
+	assert( ret2 == 2 );
+	assert( strcmp( buf, "\"\"" ) == 0 );
+}
+
 int main( void ){
 	test_bounded_snprintf_len();
 	test_rtp_report_truncated();
 	test_gtp_report_truncated();
 	test_gtp_report_complete();
+	test_output_json_wrap();
+	test_ieee802154_attr_truncated();
 
 	printf( "report-overflow: all assertions passed\n" );
 	return 0;

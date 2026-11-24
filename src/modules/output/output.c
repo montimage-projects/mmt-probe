@@ -104,7 +104,8 @@ output_t *output_alloc_init( uint16_t output_id, const struct output_conf_struct
  */
 static inline int _write( output_t *output, output_channel_conf_t channels, const char *message, bool raw ){
 	int ret = 0;
-	char new_msg[ MAX_LENGTH_REPORT_MESSAGE + 1 ];
+	//room for a whole message plus the JSON wrap: '[' , ']' and '\0'
+	char new_msg[ MAX_LENGTH_REPORT_MESSAGE + 3 ];
 
 	//we surround message inside [] to convert it to JSON
 	//this needs to be done when:
@@ -119,6 +120,9 @@ static inline int _write( output_t *output, output_channel_conf_t channels, cons
 		//surround message by [ and ]
 		new_msg[0] = '[';
 		size_t len = strlen( message );
+		//a full message still fits entirely; a longer one is truncated
+		if( len > sizeof( new_msg ) - 3 )
+			len = sizeof( new_msg ) - 3;
 		memcpy( new_msg + 1, message, len );
 		new_msg[ len+1 ] = ']';
 		new_msg[ len+2 ] = '\0';
