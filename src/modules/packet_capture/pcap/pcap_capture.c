@@ -75,7 +75,7 @@ static inline uint32_t _get_packet_hash_number( const uint8_t *packet, size_t pk
 		uint8_t src[6];
 		uint8_t dst[6];
 		uint16_t proto;
-	} *eth;
+	} eth;
 
 	uint32_t ip_src, ip_dst;
 	uint16_t port_src, port_dst;
@@ -85,10 +85,12 @@ static inline uint32_t _get_packet_hash_number( const uint8_t *packet, size_t pk
 	if ( unlikely( pkt_len < 38))
 		return 0; //TODO: this is not elegant check IP, IPv6 etc.
 
-	eth = (struct __ethernet_struct *) packet;
+	//the packet bytes are unaligned for anything but single-byte reads:
+	// copy out what is needed instead of dereferencing a cast pointer
+	memcpy( &eth, packet, sizeof( eth ));
 
 
-	switch( eth->proto ){
+	switch( eth.proto ){
 	//IP
 	case 0x08:
 		ip_offset = 26;
@@ -102,14 +104,14 @@ static inline uint32_t _get_packet_hash_number( const uint8_t *packet, size_t pk
 		return 0;
 	}
 
-	ip_src = *((uint32_t *) &packet[ ip_offset     ]);
-	ip_dst = *((uint32_t *) &packet[ ip_offset + 4 ]);
+	memcpy( &ip_src, &packet[ ip_offset     ], sizeof( ip_src ));
+	memcpy( &ip_dst, &packet[ ip_offset + 4 ], sizeof( ip_dst ));
 //
-	proto_id = *((uint8_t *) &packet[ ip_offset - 3 ]);
+	proto_id = packet[ ip_offset - 3 ];
 	//src and dst ports of TCP or UDP
 	if( likely(proto_id == 6 || proto_id == 17 )){
-		port_src = *((uint16_t *) &packet[ ip_offset + 8]);
-		port_dst = *((uint16_t *) &packet[ ip_offset + 8 + 2]);
+		memcpy( &port_src, &packet[ ip_offset + 8    ], sizeof( port_src ));
+		memcpy( &port_dst, &packet[ ip_offset + 8 + 2], sizeof( port_dst ));
 	}
 	else
 		port_dst = port_src = 0;
