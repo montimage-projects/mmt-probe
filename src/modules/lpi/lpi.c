@@ -9,6 +9,7 @@
 #include "lpi.h"
 #include <mmt_core.h>
 #include <tcpip/mmt_tcpip.h>
+#include <net/ethernet.h>
 #include <pthread.h>
 
 struct lpi_struct{
@@ -203,7 +204,7 @@ bool lpi_process_packet( lpi_t *lpi, struct pkthdr *pkt_header, const u_char *pa
 		uint8_t src[6];
 		uint8_t dst[6];
 		uint16_t proto;
-	} *eth;
+	} eth;
 
 	uint32_t ip_src, ip_dst;
 	//uint16_t port_src, port_dst;
@@ -217,16 +218,18 @@ bool lpi_process_packet( lpi_t *lpi, struct pkthdr *pkt_header, const u_char *pa
 		return false;
 
 	//TODO: this may ignore some cases in which the protocol stack is not Ethernet, but Linux Cooked Capture for example
-	eth = (struct __ethernet_struct *) packet;
+	//the packet bytes are unaligned for anything but single-byte reads:
+	// copy out what is needed instead of dereferencing a cast pointer
+	memcpy( &eth, packet, sizeof( eth ));
 
 
-	switch( eth->proto ){
+	switch( ntohs( eth.proto )){
 	//IP
-	case 0x08:
+	case ETHERTYPE_IP:
 		ip_offset = 26;
 		break;
 	//vlan
-	case 0x81:
+	case ETHERTYPE_VLAN:
 		ip_offset = 30;
 		break;
 	default:
@@ -235,8 +238,8 @@ bool lpi_process_packet( lpi_t *lpi, struct pkthdr *pkt_header, const u_char *pa
 	}
 
 	// find IP src/dst of the packet
-	ip_src = *((uint32_t *) &packet[ ip_offset     ]);
-	ip_dst = *((uint32_t *) &packet[ ip_offset + 4 ]);
+	memcpy( &ip_src, &packet[ ip_offset     ], sizeof( ip_src ));
+	memcpy( &ip_dst, &packet[ ip_offset + 4 ], sizeof( ip_dst ));
 
 	bool is_in_list = true;
 
@@ -265,8 +268,8 @@ bool lpi_process_packet( lpi_t *lpi, struct pkthdr *pkt_header, const u_char *pa
 		data = mmt_alloc_and_init_zero( sizeof( hash_data_t) );
 		//init data for this session
 		data->start_time = pkt_header->ts;
-		assign_6bytes( data->mac_src, eth->src );
-		assign_6bytes( data->mac_dst, eth->dst );
+		assign_6bytes( data->mac_src, eth.src );
+		assign_6bytes( data->mac_dst, eth.dst );
 		data->session_id = lpi->total_active_sessions;
 		//copy the ky
 		void *key_ptr = mmt_memdup( &key, key_len );
