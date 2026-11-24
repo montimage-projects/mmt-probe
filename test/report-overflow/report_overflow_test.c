@@ -226,8 +226,13 @@ static void test_output_json_wrap( void ){
 	int overs[] = { MAX_LENGTH_REPORT_MESSAGE + 1,
 			2 * MAX_LENGTH_REPORT_MESSAGE };
 	for( i=0; i<2; i++ ){
+		//the '\0' written for an earlier size stays in place and would
+		//shadow the longer messages: check the real length each call
+		//passes, and put the byte back so the next strlen sees it
 		overlong[ overs[i] ] = '\0';
+		CHECK( strlen( overlong ) == (size_t) overs[i] );
 		CHECK( _write( output, CONF_OUTPUT_CHANNEL_STDOUT, overlong, false ) == 1 );
+		overlong[ overs[i] ] = 'a' + overs[i] % 26;
 	}
 
 	capture_restore( cap, stdout_copy );
@@ -330,7 +335,7 @@ static void test_output_stix_alert( void ){
 	//the capture must contain a real STIX bundle: the first emitted line is
 	//a fitting alert, wrapped by _write's brackets
 	long capsize;
-	CHECK( fseek( cap, 0, SEEK_END ) == 0 && ( capsize = ftell( cap )) > 0 );
+	CHECK( fseek( cap, 0, SEEK_END ) == 0 && ( capsize = ftell( cap )) >= 2 );
 	rewind( cap );
 	char *emitted = malloc( capsize + 1 );
 	CHECK( emitted != NULL );
