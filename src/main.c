@@ -259,7 +259,7 @@ probe_context_t *get_context(){
 	return &context;
 }
 
-static sig_atomic_t main_processing_signal = 0;
+static volatile sig_atomic_t main_processing_signal = 0;
 //the first crash signal received: if the crash reporter itself faults, the
 // handler is re-entered - the process must then still die by the first signal
 static volatile sig_atomic_t first_crash_signal = 0;
