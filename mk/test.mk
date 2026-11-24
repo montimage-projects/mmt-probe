@@ -120,7 +120,7 @@ ERRNO_SIGNAL_TEST_SRCS := $(ERRNO_SIGNAL_TEST_DIR)/errno_signal_test.c
 ERRNO_SIGNAL_TEST_OBJS := $(addprefix $(ERRNO_SIGNAL_TEST_OBJDIR)/, \
 	$(addsuffix .o, $(basename $(notdir $(ERRNO_SIGNAL_TEST_SRCS)))))
 
-$(ERRNO_SIGNAL_TEST_OBJS): $(ERRNO_SIGNAL_TEST_OBJDIR)/%.o: $(ERRNO_SIGNAL_TEST_DIR)/%.c
+$(ERRNO_SIGNAL_TEST_OBJS): $(ERRNO_SIGNAL_TEST_OBJDIR)/%.o: $(ERRNO_SIGNAL_TEST_DIR)/%.c $(SRC_DIR)/main.c
 	@mkdir -p $(ERRNO_SIGNAL_TEST_OBJDIR)
 	$(QUIET) $(CC) $(CFLAGS) -ffunction-sections -fsanitize=address -c -o $@ $<
 
