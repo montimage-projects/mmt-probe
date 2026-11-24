@@ -69,7 +69,7 @@ Any configuration parameter can be overridden at runtime:
 input {
     mode = ONLINE            # ONLINE (live) or OFFLINE (pcap file)
     source = "eth0"          # Interface name or PCAP file path
-    snap-len = 0             # Max packet size (0 = 65535 default)
+    snap-len = 0             # Bytes kept per packet, 0-262144 (0 = savefile's snaplen offline, 65535 online)
     buffer-size = 4096       # PCAP buffer size in bytes
     timeout = 1000           # PCAP buffer timeout in milliseconds
     dpdk-option = ""         # DPDK EAL options (DPDK mode only)
@@ -343,7 +343,7 @@ dump-pcap {
     protocols = {"unknown"}  # Protocols to dump
     period = 60              # New file every N seconds
     retain-files = 50
-    snap-len = 65355
+    snap-len = 65355         # Bytes per packet in the dumped files, 0-262144
 }
 ```
 

@@ -144,6 +144,25 @@ static int _conf_parse_security_ignore_remain_flow(cfg_t *cfg, cfg_opt_t *opt, c
 	return 0;
 }
 
+/* parse a snap-len value: digits only, from 0 to PCAP_FILE_SNAP_LEN_MAX */
+bool conf_parse_snap_len( uint32_t *result, const char *value ){
+	uint32_t val = 0;
+	const char *p;
+	if( value == NULL || *value == '\0' )
+		return false;
+	for( p = value; *p != '\0'; p++ ){
+		if( *p < '0' || *p > '9' )
+			return false;
+		//the accumulator stays below PCAP_FILE_SNAP_LEN_MAX * 10 + 9,
+		// so no uint32_t overflow is possible before the bound check
+		val = val * 10 + ( *p - '0' );
+		if( val > PCAP_FILE_SNAP_LEN_MAX )
+			return false;
+	}
+	*result = val;
+	return true;
+}
+
 static inline cfg_t *_load_cfg_from_file(const char *filename) {
 	cfg_opt_t micro_flows_opts[] = {
 			CFG_BOOL("enable", false, CFGF_NONE),
@@ -461,7 +480,13 @@ static inline input_source_conf_t * _parse_input_source( cfg_t *cfg ){
 	ret->capture_mode = PCAP_CAPTURE;
 #endif
 
-	ret->snap_len    = cfg_getint( cfg, "snap-len" );
+	//snap-len is bounded by libpcap's maximum record size: a negative or
+	// bigger value is a configuration error, not a value to wrap
+	const long int snap_len = cfg_getint( cfg, "snap-len" );
+	ASSERT( snap_len >= 0 && snap_len <= PCAP_FILE_SNAP_LEN_MAX,
+		"Unexpected value %ld for 'input.snap-len': expect a number from 0 to %d",
+		snap_len, PCAP_FILE_SNAP_LEN_MAX );
+	ret->snap_len    = snap_len;
 	ret->buffer_size = cfg_getint( cfg, "buffer-size" );
 	ret->timeout     = cfg_getint( cfg, "timeout" );
 	ret->pcap_filter = _cfg_get_str(cfg, "pcap-filter");
@@ -496,7 +521,12 @@ static inline pcap_dump_conf_t *_parse_dump_to_file( cfg_t *cfg ){
 	ret->directory  = _cfg_get_dir(cfg, "output-dir");
 	ret->frequency  = cfg_getint( cfg, "period");
 	ret->retained_files_count = cfg_getint( cfg, "retain-files" );
-	ret->snap_len = cfg_getint( cfg, "snap-len" );
+	//same bound as input.snap-len: the value goes to the pcap file header
+	const long int snap_len = cfg_getint( cfg, "snap-len" );
+	ASSERT( snap_len >= 0 && snap_len <= PCAP_FILE_SNAP_LEN_MAX,
+		"Unexpected value %ld for 'dump-pcap.snap-len': expect a number from 0 to %d",
+		snap_len, PCAP_FILE_SNAP_LEN_MAX );
+	ret->snap_len = snap_len;
 
 	ret->protocols_size = cfg_size( cfg, "protocols");
 
