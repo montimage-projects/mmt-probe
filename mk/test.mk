@@ -16,6 +16,43 @@ test-stix:
 	@echo "[TEST] $(notdir $(STIX_TEST_BIN))"
 	$(QUIET) $(STIX_TEST_BIN)
 
+# STIX-on variant of the report-overflow driver (issue #9): the same test
+# built with -DSTIX_FORMAT and linked with the real stix_format.c, so the
+# STIX path of output_write_report runs end to end — fitting bundles through
+# the JSON wrap, oversized ones and non-alert bodies through the bounded CSV
+# fallback. Skipped cleanly when the libuuid headers are missing, as
+# test-stix needs them too.
+STIX_OVERFLOW_TEST_DIR    := $(TOP_DIR)/test/report-overflow
+STIX_OVERFLOW_TEST_OBJDIR := $(STIX_OVERFLOW_TEST_DIR)/obj-asan-stix
+STIX_OVERFLOW_TEST_BIN    := $(STIX_OVERFLOW_TEST_DIR)/report-overflow-stix-test
+STIX_OVERFLOW_TEST_OBJS   := $(STIX_OVERFLOW_TEST_OBJDIR)/report_overflow_test.o \
+	$(STIX_OVERFLOW_TEST_OBJDIR)/stix_format.o
+HAVE_UUID_HEADERS         := $(shell printf '#include <uuid/uuid.h>\n' | \
+	$(CC) -fsyntax-only -x c - > /dev/null 2>&1 && echo 1)
+
+$(STIX_OVERFLOW_TEST_OBJDIR)/report_overflow_test.o: $(STIX_OVERFLOW_TEST_DIR)/report_overflow_test.c
+	@mkdir -p $(STIX_OVERFLOW_TEST_OBJDIR)
+	$(QUIET) $(CC) $(CFLAGS) -fsanitize=address -DSTIX_FORMAT -DREPORT_OVERFLOW_TEST_STIX -c -o $@ $<
+
+$(STIX_OVERFLOW_TEST_OBJDIR)/stix_format.o: $(SRC_DIR)/modules/output_format/stix_format.c
+	@mkdir -p $(STIX_OVERFLOW_TEST_OBJDIR)
+	$(QUIET) $(CC) $(CFLAGS) -fsanitize=address -c -o $@ $<
+
+$(STIX_OVERFLOW_TEST_BIN): $(STIX_OVERFLOW_TEST_OBJS)
+	$(QUIET) $(CC) $(CLDFLAGS) -fsanitize=address -o $@ $^ $(LIBS) -luuid
+
+.PHONY: test-report-overflow-stix
+ifdef HAVE_UUID_HEADERS
+test-report-overflow-stix: --check-dpi-folder $(STIX_OVERFLOW_TEST_BIN)
+	@echo "[TEST] report-overflow STIX-on under ASan"
+	$(QUIET) status=0; $(STIX_OVERFLOW_TEST_BIN) || status=$$?; \
+		$(RM) $(STIX_OVERFLOW_TEST_OBJDIR) $(STIX_OVERFLOW_TEST_BIN); exit $$status
+else
+test-report-overflow-stix:
+	@echo "[TEST] report-overflow STIX-on under ASan"
+	@echo "SKIP report-overflow-stix (uuid/uuid.h not found)"
+endif
+
 #####################################################
 # INTEGRATION CHECKS                                #
 #####################################################
@@ -96,5 +133,5 @@ test-online-signals: compile
 	$(QUIET) sh $(TOP_DIR)/test/online_signals.sh
 
 .PHONY: test
-test: test-stix test-snaplen test-crash test-report-overflow test-online-signals
+test: test-stix test-report-overflow-stix test-snaplen test-crash test-report-overflow test-online-signals
 	@:
