@@ -6,6 +6,7 @@
  */
 
 #include "session_report.h"
+#include "../../../lib/string_builder.h"
 #include "../../../lib/malloc_ext.h"
 
 struct session_rtp_stat_struct {
@@ -132,7 +133,7 @@ int print_rtp_report(char *message, size_t message_size, const mmt_session_t * d
 
     order_error = ((double) rtp->nb_order_error / (rtp->packets_nb + 1));
 
-    size_t ret = snprintf( message, message_size,
+    int ret = snprintf( message, message_size,
             "%.3f,%.3f,%u,%.3f",
             loss_rate,
             loss_burstiness,
@@ -140,5 +141,7 @@ int print_rtp_report(char *message, size_t message_size, const mmt_session_t * d
 			order_error
     );
     _reset_rtp( rtp );
-    return ret;
+    //snprintf reports the length it would have written: bound it to what was
+    //really appended so the caller's offset stays inside the report buffer
+    return bounded_snprintf_len( message_size, ret );
 }

@@ -41,6 +41,32 @@ test-crash: compile
 	@echo "[TEST] crash exit status"
 	$(QUIET) sh $(TOP_DIR)/test/crash_exit_status.sh
 
+# Report-writer bounds (issue #9): the writers must truncate a report that is
+# longer than the buffer instead of writing past it. The driver is built with
+# ASan and its objects live under test/report-overflow/ so a parallel
+# `make -j test` does not race the normal build in src/.
+REPORT_OVERFLOW_TEST_DIR := $(TOP_DIR)/test/report-overflow
+REPORT_OVERFLOW_TEST_OBJDIR := $(REPORT_OVERFLOW_TEST_DIR)/obj-asan
+REPORT_OVERFLOW_TEST_BIN  := $(REPORT_OVERFLOW_TEST_DIR)/report-overflow-test
+REPORT_OVERFLOW_TEST_SRCS := $(REPORT_OVERFLOW_TEST_DIR)/report_overflow_test.c
+REPORT_OVERFLOW_TEST_OBJS := $(addprefix $(REPORT_OVERFLOW_TEST_OBJDIR)/, \
+	$(addsuffix .o, $(basename $(notdir $(REPORT_OVERFLOW_TEST_SRCS)))))
+
+# UBSan is not enabled here, as in test-snaplen-asan: it reports pre-existing
+# misaligned loads in _get_packet_hash_number (pcap_capture.c).
+$(REPORT_OVERFLOW_TEST_OBJS): $(REPORT_OVERFLOW_TEST_OBJDIR)/%.o: $(REPORT_OVERFLOW_TEST_DIR)/%.c
+	@mkdir -p $(REPORT_OVERFLOW_TEST_OBJDIR)
+	$(QUIET) $(CC) $(CFLAGS) -fsanitize=address -c -o $@ $<
+
+$(REPORT_OVERFLOW_TEST_BIN): $(REPORT_OVERFLOW_TEST_OBJS)
+	$(QUIET) $(CC) $(CLDFLAGS) -fsanitize=address -o $@ $^ $(LIBS)
+
+.PHONY: test-report-overflow
+test-report-overflow: --check-dpi-folder $(REPORT_OVERFLOW_TEST_BIN)
+	@echo "[TEST] report-overflow under ASan"
+	$(QUIET) status=0; $(REPORT_OVERFLOW_TEST_BIN) || status=$$?; \
+		$(RM) $(REPORT_OVERFLOW_TEST_OBJDIR) $(REPORT_OVERFLOW_TEST_BIN); exit $$status
+
 .PHONY: test
-test: test-snaplen test-crash
+test: test-snaplen test-crash test-report-overflow
 	@:

@@ -379,6 +379,7 @@ security_context_t* security_worker_alloc_init( const security_conf_t *config,
 	int att_registed_offset = 0;
 	const int att_registed_length = 10000;
 	char att_registed[10000];
+	att_registed[0] = '\0';
 	uint32_t add_att_id;
 	if( ! config->is_enable )
 		return NULL;
@@ -413,16 +414,18 @@ security_context_t* security_worker_alloc_init( const security_conf_t *config,
 			log_write( LOG_WARNING, "Cannot register protocol/attribute %s.%s", ret->proto_atts[i]->proto, ret->proto_atts[i]->att );
 		}
 		else if( verbose )
-			att_registed_offset += snprintf( att_registed + att_registed_offset, MAX( att_registed_length - att_registed_offset, 0),
-					"%s.%s,", ret->proto_atts[i]->proto, ret->proto_atts[i]->att );
+			att_registed_offset += bounded_snprintf_len( MAX( att_registed_length - att_registed_offset, 0),
+					snprintf( att_registed + att_registed_offset, MAX( att_registed_length - att_registed_offset, 0),
+					"%s.%s,", ret->proto_atts[i]->proto, ret->proto_atts[i]->att ) );
 
 		//for some attribute, we need to register another attribute
 		// example, we need `tcp_session_payload_up_len` when one wants to access `tcp_session_payload_up`
 		 if( _register_additional_attributes_if_need( dpi_handler, ret->proto_atts[i]->proto_id, ret->proto_atts[i]->att_id, &add_att_id ) ){
 			 if( verbose )
-				 att_registed_offset += snprintf( att_registed + att_registed_offset, MAX( att_registed_length - att_registed_offset, 0),
+				 att_registed_offset += bounded_snprintf_len( MAX( att_registed_length - att_registed_offset, 0),
+						snprintf( att_registed + att_registed_offset, MAX( att_registed_length - att_registed_offset, 0),
 			 					"%s.%s,", ret->proto_atts[i]->proto,
-								get_attribute_name_by_protocol_and_attribute_ids(ret->proto_atts[i]->proto_id, add_att_id ));
+								get_attribute_name_by_protocol_and_attribute_ids(ret->proto_atts[i]->proto_id, add_att_id )) );
 		 }
 
 #ifdef TCP_REASSEMBLY_MODULE
@@ -445,7 +448,9 @@ security_context_t* security_worker_alloc_init( const security_conf_t *config,
 	if( verbose ){
 		rule_info_t const* const* rules_array = NULL;
 		//remove the last comma
-		att_registed[ strlen( att_registed ) - 1 ] = '\0';
+		size_t att_registed_len = strlen( att_registed );
+		if( att_registed_len > 0 )
+			att_registed[ att_registed_len - 1 ] = '\0';
 		log_write( LOG_INFO,"Registered %u proto.atts to process %zu rules: %s",
 				ret->proto_atts_count,
 				mmt_sec_get_rules_info( &rules_array ),
