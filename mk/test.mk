@@ -192,6 +192,21 @@ test-output-format: compile
 	@echo "[TEST] output.format and enum-like -X values"
 	$(QUIET) sh $(TOP_DIR)/test/output-format/check_output_format.sh $(TOP_DIR)/$(APP)
 
+# system-report.output-channel (issue #43): declared CHAR_STAR over an
+# output_channel_conf_t field, so a -X override freed and cloned a string
+# into the enum and died by SIGSEGV. Declared LIST like the other
+# *.output-channel keys, it must accept the channel spellings the
+# configuration file accepts - a name, a list - and write the system
+# report to the file output; a malformed list in the file is refused. The
+# system-stats routine writes one report every 5 seconds, so the legs feed
+# the pcap through a FIFO held open for a report to fire. The compile
+# prerequisite keeps a parallel `make -j test` on a clean tree from racing
+# the build.
+.PHONY: test-sysreport-channel
+test-sysreport-channel: compile
+	@echo "[TEST] system-report.output-channel -X values"
+	$(QUIET) sh $(TOP_DIR)/test/sysreport-channel/check_sysreport_channel.sh $(TOP_DIR)/$(APP)
+
 .PHONY: test
-test: test-snaplen test-crash test-report-overflow test-dynconf-reply test-online-signals test-errno-signal test-hash test-file-output-unset test-output-format
+test: test-snaplen test-crash test-report-overflow test-dynconf-reply test-online-signals test-errno-signal test-hash test-file-output-unset test-output-format test-sysreport-channel
 	@:
