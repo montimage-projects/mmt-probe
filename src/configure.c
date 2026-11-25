@@ -1158,16 +1158,12 @@ static inline socket_output_conf_t *_parse_socket_block( cfg_t *cfg ){
 }
 
 
+//Return NULL when the configuration has no 'reconstruct-data <name>' block:
+// the users of conf->reconstructions.ftp/http must accept NULL
 static inline reconstruct_data_conf_t *_parse_reconstruct_data_block( cfg_t *cfg, const char *name ){
 	int size = cfg_size( cfg, "reconstruct-data");
 	int i;
 	cfg_t *c;
-
-	if( size == 0 ){
-		log_write( LOG_ERR, "Expected reconstruct-data blocks" );
-		abort();
-		return NULL;
-	}
 
 	for( i=0; i<size; i++ ){
 		c = cfg_getnsec(cfg, "reconstruct-data", i );

@@ -390,7 +390,8 @@ static const conditional_handler_t handlers[] = {
 };
 
 http_reconstruct_t *http_reconstruct_init( const reconstruct_data_conf_t *config, mmt_handler_t *dpi_handler, output_t *report ){
-		if( config->is_enable == false )
+		//config is NULL when the configuration has no 'reconstruct-data http' block
+		if( config == NULL || config->is_enable == false )
 			return NULL;
 	//struct to register attributes
 
