@@ -32,15 +32,19 @@ static void _connect_to_mqtt(mqtt_output_t *context) {
 
 	if( rc ){
 		log_write( LOG_ERR, "Failed to create MQTT client '%s: %d'", client_id, rc);
-		abort();
+		context->client = NULL;
+		return;
 	} else
 		log_write( LOG_INFO, "Created MQTT client '%s'", client_id);
 
 
 	rc = MQTTClient_connect(context->client, &conn_opts);
 	if( rc != MQTTCLIENT_SUCCESS ) {
+		//an unreachable broker disables this channel but must not kill the
+		// probe: other channels - and the output itself - keep working
 		log_write(LOG_ERR, "Failed to connect MQTT to '%s': %d", context->config->address, rc);
-		abort();
+		MQTTClient_destroy(&context->client);
+		context->client = NULL;
 	} else
 		log_write(LOG_INFO, "Connected MQTT to '%s'", context->config->address);
 }
@@ -59,6 +63,9 @@ mqtt_output_t* mqtt_output_alloc_init( const mqtt_output_conf_t*config,  uint16_
 }
 
 int mqtt_output_send( mqtt_output_t *context, const char *message ){
+	//no broker was reached at init: the channel drops the message
+	if( context == NULL || context->client == NULL )
+		return 0;
 	MQTTClient_message pubmsg = MQTTClient_message_initializer;
 	MQTTClient_deliveryToken token;
 	int rc;
@@ -88,11 +95,13 @@ void mqtt_output_release( mqtt_output_t * context){
 	if( context == NULL )
 		return;
 
-	int rc = MQTTClient_disconnect(context->client, 10000);
+	if( context->client != NULL ){
+		int rc = MQTTClient_disconnect(context->client, 10000);
 
-	if( rc != MQTTCLIENT_SUCCESS)
-		log_write(LOG_ERR, "Failed to disconnect MQTT client: %d", rc);
+		if( rc != MQTTCLIENT_SUCCESS)
+			log_write(LOG_ERR, "Failed to disconnect MQTT client: %d", rc);
 
-	MQTTClient_destroy(&context->client);
+		MQTTClient_destroy(&context->client);
+	}
 	mmt_probe_free( context );
 }

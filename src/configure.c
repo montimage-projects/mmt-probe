@@ -1210,6 +1210,7 @@ void conf_update_output_enable( output_conf_t *outputs ){
 						|| (outputs->mongodb != NULL && outputs->mongodb->is_enable)
 						|| (outputs->redis != NULL && outputs->redis->is_enable)
 						|| (outputs->kafka != NULL && outputs->kafka->is_enable )
+						|| (outputs->mqtt != NULL && outputs->mqtt->is_enable )
 						|| (outputs->socket != NULL && outputs->socket->is_enable ));
 }
 
