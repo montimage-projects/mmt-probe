@@ -282,10 +282,9 @@ including the alerts raised by the last packets of a capture: each worker
 drains its security threads before its output is closed. The same drain
 runs when an online capture is stopped by SIGINT or SIGTERM, and a
 repetition of that signal during the shutdown does not cut it short.
-The final
-statistics give the number of alerts raised (`... generated N alerts`),
-which is, for each output channel of the security reports, with
-`retain-files = 0`, the number of security reports written. With
+The final statistics give the number of alerts raised (`... generated
+N alerts`), which is, for each output channel of the security reports,
+with `retain-files = 0`, the number of security reports written. With
 `retain-files` greater than 0, older sampled files are removed, so the
 files left on disk can hold fewer. `make test-alert-delivery` checks this
 over repeated runs.

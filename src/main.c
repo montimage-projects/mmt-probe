@@ -394,7 +394,10 @@ void signal_handler(int type) {
 		// reaches this process both directly and through the monitor's
 		// forward while the drain still runs - security teardown, the
 		// output fclose/.sem and the stdio flush must all still happen.
-		// The monitor's grace timeout remains the hard exit.
+		// A different second signal remains the hard exit; a stuck
+		// drain is bounded externally (e.g. systemd TimeoutStopSec or
+		// docker stop's SIGKILL) - the monitor has no timer of its
+		// own, it blocks in waitpid.
 		errno = saved_errno;
 		return;
 	}

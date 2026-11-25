@@ -87,9 +87,12 @@ security engine is unregistered, output files are flushed and closed
 logged. A repeat of the signal that armed the shutdown is a no-op: a
 group-wide Ctrl+C or `systemctl stop` (`KillMode=control-group`) reaches
 the child both directly and through the monitor's forward, and neither
-repeat is allowed to cut the drain short - the monitor's own grace
-timeout remains the hard exit. A *different* second signal (e.g., SIGTERM
-while handling SIGINT) still exits the child immediately.
+repeat is allowed to cut the drain short. A *different* second signal
+(e.g., SIGTERM while handling SIGINT) remains the hard exit: it exits
+the child immediately. The monitor has no grace timer of its own - it
+blocks in `waitpid` while the child drains - so a stuck drain is
+bounded externally, e.g. by systemd `TimeoutStopSec` or the SIGKILL of
+`docker stop`.
 
 The processing child reports its fate to the monitor through its exit
 status:
