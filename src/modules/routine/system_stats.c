@@ -112,8 +112,9 @@ static void * _stats_routine(void * args){
 		//sleep 1 second
 		nanosleep( (const struct timespec[]){{ .tv_sec = 1, .tv_nsec = 0}}, NULL );
 
-		//do statistics
-		if( timer_1 == 5 ){// context->config->frequency ){
+		//do statistics, every 'frequency' seconds - the value is validated
+		// to be >= 1 when the configuration is parsed or overridden
+		if( timer_1 >= context->config->frequency ){
 			timer_1 = 0;
 			if( ! _read_cpu_info( &cpu_2.user, &cpu_2.system, &cpu_2.idle) ||
 						! _read_mem_info( &mem_avail, &mem_total ) ){
@@ -122,7 +123,7 @@ static void * _stats_routine(void * args){
 			//cputime between two sample moments
 			diff_cpu_total = (cpu_2.user + cpu_2.system + cpu_2.idle) - (cpu_1.user + cpu_1.system + cpu_1.idle);
 
-			//Print this report every 5 second
+			//Print this report every 'frequency' seconds
 			gettimeofday(&ts, NULL);
 			output_write_report_with_format(context->output,
 					context->config->output_channels,

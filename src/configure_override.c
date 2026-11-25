@@ -200,6 +200,24 @@ static inline conf_override_ret_t _override_element_by_ident( probe_conf_t *conf
 			return CONF_OVERRIDE__OK;
 		*((uint32_t *)field_ptr) = int_val;
 		return CONF_OVERRIDE__OK;
+	//the period drives the system-stats cadence: a value that does not fit
+	// the uint16_t field wraps into a different cadence, and 0 - "unset" in
+	// the configuration file - is no cadence at all; both are refused, the
+	// same bound the configuration-file parse applies
+	case CONF_ATT__SYSTEM_REPORT__PERIOD: {
+		char *end = NULL;
+		const long period = strtol( value_str, &end, 10 );
+		if( *value_str == '\0' || *end != '\0' || period <= 0 || period > UINT16_MAX ){
+			log_write( LOG_WARNING, "Unexpected value [%s] for [%s]: expect a number from 1 to %d",
+					value_str, ident->ident, UINT16_MAX );
+			return CONF_OVERRIDE__REFUSED;
+		}
+		//value does not change ==> do nothing
+		if( period == *((uint16_t *)field_ptr) )
+			return CONF_OVERRIDE__OK;
+		*((uint16_t *)field_ptr) = period;
+		return CONF_OVERRIDE__OK;
+	}
 	default:
 		break;
 	}

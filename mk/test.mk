@@ -275,6 +275,19 @@ test-sysreport-channel: compile
 	@echo "[TEST] system-report.output-channel -X values"
 	$(QUIET) sh $(TOP_DIR)/test/sysreport-channel/check_sysreport_channel.sh $(TOP_DIR)/$(APP)
 
+# system-report.period (issue #49): the value was parsed but the
+# system-stats routine fired on a hardcoded 5 s. A configured period must
+# change the cadence of the type-201 report, an unset/0 period keeps the
+# 5 s default, and out-of-range values - negative, wider than the uint16_t
+# field, or 0 through -X - are refused. The legs feed the pcap through a
+# FIFO held open so the routine fires before the stream ends. The compile
+# prerequisite keeps a parallel `make -j test` on a clean tree from racing
+# the build.
+.PHONY: test-sysreport-period
+test-sysreport-period: compile
+	@echo "[TEST] system-report.period cadence and values"
+	$(QUIET) sh $(TOP_DIR)/test/sysreport-period/check_sysreport_period.sh $(TOP_DIR)/$(APP)
+
 # End-of-capture alert delivery (issue #38): every alert MMT-Security raises
 # during an offline capture must be written before the probe exits, on every
 # run. Runs ./probe RUNS times (default 3) per leg on a generated capture
@@ -291,5 +304,5 @@ test-alert-delivery: compile
 	$(QUIET) sh $(TOP_DIR)/test/alert-delivery/check_alert_delivery.sh $(TOP_DIR)/$(APP)
 
 .PHONY: test
-test: test-stix test-report-overflow-stix test-snaplen test-crash test-report-overflow test-dynconf-reply test-online-signals test-errno-signal test-hash test-file-output-unset test-output-format test-sysreport-channel test-alert-delivery test-mqtt-output
+test: test-stix test-report-overflow-stix test-snaplen test-crash test-report-overflow test-dynconf-reply test-online-signals test-errno-signal test-hash test-file-output-unset test-output-format test-sysreport-channel test-sysreport-period test-alert-delivery test-mqtt-output
 	@:
