@@ -42,10 +42,13 @@ Any configuration parameter can be overridden at runtime:
 ./probe -i eth0 -Xfile-output.enable=true -Xfile-output.output-dir=/tmp/
 ```
 
-A value is parsed as in the configuration file: an option that takes a name
-takes the same names through `-X`, not a number. For example
-`-Xoutput.format=JSON` (`CSV` or `JSON`, case-insensitive). `./probe -x`
-lists the accepted names of such options, and the type of the others.
+An option that takes a name (see -x) takes the same names as in the
+configuration file, not a number: output.format takes CSV or JSON,
+case-insensitive (empty means CSV). A boolean option takes true, in lower
+case: any other value means false.
+
+For example `-Xoutput.format=JSON`. `./probe -x` lists the accepted names of
+such options, and the type of the others.
 
 ### List all overridable parameters
 
