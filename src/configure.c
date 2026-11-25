@@ -750,7 +750,18 @@ static inline system_stats_conf_t *_parse_cpu_mem_block( cfg_t *cfg ){
 
 	system_stats_conf_t *ret = mmt_alloc( sizeof( system_stats_conf_t ));
 	ret->is_enable = cfg_getbool( cfg, "enable" );
-	ret->frequency = cfg_getint( cfg, "period" );
+	//the period goes to an uint16_t: a negative or wider value wraps into a
+	// different cadence - it refuses the whole configuration instead, the
+	// same handling as input.snap-len
+	const long int period = cfg_getint( cfg, "period" );
+	if( period < 0 || period > UINT16_MAX ){
+		log_write( LOG_ERR, "Unexpected value %ld for 'system-report.period': expect a number from 0 to %d",
+			period, UINT16_MAX );
+		mmt_probe_free( ret );
+		_conf_refused = true;
+		return NULL;
+	}
+	ret->frequency = period;
 	ret->output_channels = _parse_output_channel( cfg );
 	return ret;
 }
