@@ -30,6 +30,36 @@ const identity_t* conf_get_identity_from_string( const char * ident_str ){
 }
 
 
+/*
+ * The enum-like parameters: their value is a name, parsed by the same
+ * function as the configuration file, so -X accepts exactly the values the
+ * file accepts. 'values' is that parser's list of accepted names.
+ */
+typedef struct {
+	int ident;
+	bool (*parse)( int *result, const char *value );
+	const char *values;
+} enum_parameter_t;
+
+static const enum_parameter_t* _get_enum_parameter( int ident_val ){
+	static const enum_parameter_t enums[] = {
+		{ CONF_ATT__INPUT__MODE,              conf_parse_input_mode,           CONF_INPUT_MODE_VALUES },
+		{ CONF_ATT__SESSION_REPORT__RTT_BASE, conf_parse_rtt_base,             CONF_RTT_BASE_VALUES },
+		{ CONF_ATT__OUTPUT__FORMAT,           conf_parse_output_format,        CONF_OUTPUT_FORMAT_VALUES },
+#ifdef SOCKET_MODULE
+		{ CONF_ATT__SOCKET_OUTPUT__TYPE,      conf_parse_output_socket_type,   CONF_SOCKET_TYPE_VALUES },
+#endif
+#ifdef SECURITY_MODULE
+		{ CONF_ATT__SECURITY__INGORE_REMAIN_FLOW, conf_parse_security_ignore_mode, CONF_SECURITY_IGNORE_REMAIN_FLOW_VALUES },
+#endif
+	};
+	size_t i;
+	for( i=0; i<sizeof( enums ) / sizeof( enums[0] ); i++ )
+		if( enums[i].ident == ident_val )
+			return &enums[i];
+	return NULL;
+}
+
 const char* conf_validate_data_value( const identity_t *ident, const char *data_value ){
 	static char error_reason[1000];
 	int i;
@@ -145,56 +175,20 @@ static inline bool _override_element_by_ident( probe_conf_t *conf, const identit
 	}
 	char **string_ptr;
 
+	//enum-like parameters: parsed as in the configuration file
+	const enum_parameter_t *enum_param = _get_enum_parameter( ident->val );
+	if( enum_param != NULL ){
+		if( ! enum_param->parse( &enum_val, value_str ) ){
+			log_write( LOG_WARNING, "Unexpected value [%s] for [%s]: expect %s",
+					value_str, ident->ident, enum_param->values );
+			return false;
+		}
+		*((int *)field_ptr) = enum_val;
+		return true;
+	}
+
 	//special data type
 	switch( ident->val ){
-		//input
-	case CONF_ATT__INPUT__MODE:
-		if( conf_parse_input_mode( &enum_val, value_str ) )
-			*((int *)field_ptr) = enum_val;
-		else{
-			log_write( LOG_WARNING, "Unexpected value [%s] for [%s]", value_str, ident->ident );
-			return false;
-		}
-		return true;
-		//
-	case CONF_ATT__SESSION_REPORT__RTT_BASE:
-		if( conf_parse_rtt_base(&enum_val, value_str ) )
-			*((int *)field_ptr) = enum_val;
-		else{
-			log_write( LOG_WARNING, "Unexpected value [%s] for [%s]", value_str, ident->ident );
-			return false;
-		}
-		return true;
-	case CONF_ATT__OUTPUT__FORMAT:
-		if( conf_parse_output_format(&enum_val, value_str ) )
-			*((int *)field_ptr) = enum_val;
-		else{
-			log_write( LOG_WARNING, "Unexpected value [%s] for [%s]", value_str, ident->ident );
-			return false;
-		}
-		return true;
-#ifdef SOCKET_MODULE
-	case CONF_ATT__SOCKET_OUTPUT__TYPE:
-		if( conf_parse_output_socket_type(&enum_val, value_str ) )
-			*((int *)field_ptr) = enum_val;
-		else{
-			log_write( LOG_WARNING, "Unexpected value [%s] for [%s]", value_str, ident->ident );
-			return false;
-		}
-		return true;
-#endif
-
-#ifdef SECURITY_MODULE
-	case CONF_ATT__SECURITY__INGORE_REMAIN_FLOW:
-		if( conf_parse_security_ignore_mode( &enum_val, value_str ) )
-			*((int *)field_ptr) = enum_val;
-		else{
-			log_write( LOG_WARNING, "Unexpected value [%s] for [%s]", value_str, ident->ident );
-			return false;
-		}
-		return true;
-#endif
-
 	//snap-len values are bounded by libpcap's maximum record size: a
 	// non-numeric, negative or bigger value is rejected instead of being
 	// silently wrapped into the field
@@ -344,7 +338,16 @@ void conf_print_identities_list(){
 	const identity_t *identities;
 	size_t nb_parameters = conf_get_identities( &identities );
 
-	for( i=0; i<nb_parameters; i++ )
-		if( identities[i].data_type !=NO_SUPPORT  )
+	const enum_parameter_t *enum_param;
+
+	for( i=0; i<nb_parameters; i++ ){
+		if( identities[i].data_type == NO_SUPPORT )
+			continue;
+		//an enum-like parameter takes a name, not the number of its storage type
+		enum_param = _get_enum_parameter( identities[i].val );
+		if( enum_param != NULL )
+			printf("%s (%s)\n", identities[i].ident, enum_param->values );
+		else
 			printf("%s (%s)\n", identities[i].ident, data_type_strings[identities[i].data_type]);
+	}
 }
