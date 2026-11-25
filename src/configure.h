@@ -410,6 +410,12 @@ size_t conf_parse_list( const char *string, char ***proto_lst );
  */
 int conf_validate( probe_conf_t *conf );
 
+/**
+ * Recompute the global outputs->is_enable from its output channels.
+ * It must be called once a channel's is_enable is changed after the parse.
+ */
+void conf_update_output_enable( output_conf_t *outputs );
+
 bool conf_parse_input_mode( int *result, const char *string );
 
 /**

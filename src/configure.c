@@ -1204,6 +1204,17 @@ static inline void _parse_output_block( output_conf_t *output, cfg_t *cfg ){
 }
 /**
  * Public API
+ */
+void conf_update_output_enable( output_conf_t *outputs ){
+	outputs->is_enable = ( (outputs->file != NULL && outputs->file->is_enable )
+						|| (outputs->mongodb != NULL && outputs->mongodb->is_enable)
+						|| (outputs->redis != NULL && outputs->redis->is_enable)
+						|| (outputs->kafka != NULL && outputs->kafka->is_enable )
+						|| (outputs->socket != NULL && outputs->socket->is_enable ));
+}
+
+/**
+ * Public API
  * @param filename
  * @return
  */
@@ -1240,11 +1251,7 @@ probe_conf_t* conf_load_from_file( const char* filename ){
 	conf->outputs.mongodb = _parse_output_to_mongodb( cfg );
 	conf->outputs.socket = _parse_socket_block( cfg );
 	//a global
-	conf->outputs.is_enable = ( (conf->outputs.file != NULL && conf->outputs.file->is_enable )
-									|| (conf->outputs.mongodb != NULL && conf->outputs.mongodb->is_enable)
-									|| (conf->outputs.redis != NULL && conf->outputs.redis->is_enable)
-									|| (conf->outputs.kafka != NULL && conf->outputs.kafka->is_enable )
-									|| (conf->outputs.socket != NULL && conf->outputs.socket->is_enable ));
+	conf_update_output_enable( &conf->outputs );
 
 	conf->dynamic_conf = _parse_dynamic_config_block( cfg );
 	//
@@ -1459,6 +1466,8 @@ static inline int _missing_conf_str( const char *block, const char *key, const c
 
 int conf_validate( probe_conf_t *conf ){
 	int ret = 0;
+	//-X overrides run after the parse and may enable an output channel
+	conf_update_output_enable( &conf->outputs );
 	if( conf->outputs.mongodb ){
 	}
 

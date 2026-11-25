@@ -192,13 +192,13 @@ static inline int _write( output_t *output, output_channel_conf_t channels, cons
  * Currently we need to lock only when security is enable.
  */
 #define __LOCK_IF_NEED( output )                        \
-	while( output->mutex != NULL &&                     \
+	while( output != NULL && output->mutex != NULL &&   \
 		pthread_mutex_lock( output->mutex ) != 0 );     \
 /*
  * This macro unlocks the mutex being locked by the macro above.
  */
 #define __UNLOCK_IF_NEED( output )                      \
-	while( output->mutex != NULL &&                     \
+	while( output != NULL && output->mutex != NULL &&   \
 		pthread_mutex_unlock( output->mutex ) != 0 );   \
 
 
