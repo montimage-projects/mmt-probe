@@ -13,10 +13,14 @@
 #     build), dump-pcap.output-dir, socket-output.descriptor and
 #     reconstruct-data.*.output-dir (only on the matching module builds);
 #   - a disabled file-output needs no output-file (no false reject);
-#   - a fully configured file-output still runs to the end of the pcap.
+#   - a fully configured file-output still runs to the end of the pcap,
+#     and so does one enabled only by -X overrides;
+#   - a configuration without the 'reconstruct-data http' and/or 'ftp'
+#     block runs (their init dereferenced the NULL block), and a -X on a
+#     missing block is rejected instead of writing through NULL.
 #
-# On the unfixed code the first legs die by SIGSEGV (or a UBSan report)
-# instead of printing the error, so the check fails.
+# On the unfixed code these legs die by SIGSEGV (or a UBSan report), or
+# run without printing the error, so the check fails.
 #
 # Usage: check_file_output_unset.sh [PROBE] [WORKDIR]
 #   PROBE    probe binary (default: ./probe)
@@ -128,7 +132,9 @@ expect_run() {
 
 conf_with() {
 	# $1: output file name, $2: the conf to extend (or - for $CONF);
-	# the remaining arguments are appended as configuration blocks
+	# the remaining arguments are appended as configuration blocks: an
+	# appended non-multi block (file-output, ...) is merged by libconfuse
+	# with an earlier one, its options winning
 	out="$WORK_DIR/$1"
 	shift
 	if [ "$1" = "-" ]; then
@@ -141,6 +147,16 @@ conf_with() {
 		printf '%s\n' "$block" >> "$out"
 	done
 	printf '%s\n' "$out"
+}
+
+#the modules compiled in, for the module-only legs
+MODULES=$("$PROBE" -v 2>&1)
+has() {
+	printf '%s\n' "$MODULES" | grep -q "$1"
+}
+skip() {
+	nb_skip=$((nb_skip + 1))
+	echo "SKIP $1 (no $2)"
 }
 
 echo "check_file_output_unset: probe=$PROBE pcap=$PCAP"
@@ -185,29 +201,27 @@ expect_reject "behaviour-file" "behaviour.output-file" \
 
 #dynamic-config: the descriptor is a UNIX socket path, strlen()ed at
 # server start - only checkable when the module was compiled in
-if "$PROBE" -v 2>&1 | grep -q DYNAMIC_CONF; then
+if has DYNAMIC_CONF; then
 	expect_reject "dynamic-config" "dynamic-config.descriptor" \
 		-c "$(conf_with dynconf.conf - 'dynamic-config { enable = true }')" \
 		-t "$PCAP"
 else
-	nb_skip=$((nb_skip + 1))
-	echo "SKIP dynamic-config (no DYNAMIC_CONFIG_MODULE)"
+	skip dynamic-config DYNAMIC_CONFIG_MODULE
 fi
 
 #dump-pcap: output-dir builds the dump file names
-if "$PROBE" -v 2>&1 | grep -q PCAP_DUMP; then
+if has PCAP_DUMP; then
 	expect_reject "dump-pcap" "dump-pcap.output-dir" \
 		-c "$(conf_with dumppcap.conf - 'dump-pcap { enable = true }')" \
 		-t "$PCAP"
 else
-	nb_skip=$((nb_skip + 1))
-	echo "SKIP dump-pcap (no PCAP_DUMP_MODULE)"
+	skip dump-pcap PCAP_DUMP_MODULE
 fi
 
 #socket-output: the descriptor is a UNIX socket path strcpy()ed into
 # sun_path, and the hostname is resolved - both required when their socket
 # type is in use
-if "$PROBE" -v 2>&1 | grep -q 'SOCKET'; then
+if has SOCKET; then
 	expect_reject "socket-descriptor" "socket-output.descriptor" \
 		-c "$(conf_with sockunix.conf - \
 			'socket-output { enable = true type = UNIX descriptor = "" }')" \
@@ -217,31 +231,49 @@ if "$PROBE" -v 2>&1 | grep -q 'SOCKET'; then
 			'socket-output { enable = true type = TCP hostname = "" }')" \
 		-t "$PCAP"
 else
-	nb_skip=$((nb_skip + 1))
-	echo "SKIP socket-output (no SOCKET_MODULE)"
+	skip socket-output SOCKET_MODULE
 fi
 
 #reconstruct-data: output-dir builds the reconstructed file names; the
-# fixture's disabled blocks are flipped to enabled, and tcp reassembly is
-# required by the reconstruction itself
-if "$PROBE" -v 2>&1 | grep -q FTP_RECONSTRUCT; then
-	sed '/reconstruct-data ftp {/,/}/ s/enable = false/enable = true/' \
-		"$CONF" > "$WORK_DIR/ftp.conf"
-	expect_reject "reconstruct-ftp" "reconstruct-data.ftp.output-dir" \
-		-c "$WORK_DIR/ftp.conf" -X enable-tcp-reassembly=true -t "$PCAP"
-else
-	nb_skip=$((nb_skip + 1))
-	echo "SKIP reconstruct-ftp (no FTP_RECONSTRUCT_MODULE)"
-fi
-if "$PROBE" -v 2>&1 | grep -q HTTP_RECONSTRUCT; then
-	sed '/reconstruct-data http {/,/}/ s/enable = false/enable = true/' \
-		"$CONF" > "$WORK_DIR/http.conf"
-	expect_reject "reconstruct-http" "reconstruct-data.http.output-dir" \
-		-c "$WORK_DIR/http.conf" -X enable-tcp-reassembly=true -t "$PCAP"
-else
-	nb_skip=$((nb_skip + 1))
-	echo "SKIP reconstruct-http (no HTTP_RECONSTRUCT_MODULE)"
-fi
+# fixture's disabled blocks are flipped to enabled, and tcp reassembly (with
+# the ip defragmentation it needs) is required by the reconstruction itself;
+# its option exists only on a TCP_REASSEMBLY_MODULE build
+REASSEMBLY=""
+has TCP_REASSEMBLY \
+	&& REASSEMBLY="-X enable-tcp-reassembly=true -X enable-ip-defragmentation=true"
+for p in ftp http; do
+	P=$(echo "$p" | tr a-z A-Z)
+	if has "${P}_RECONSTRUCT"; then
+		sed "/reconstruct-data $p {/,/}/ s/enable = false/enable = true/" \
+			"$CONF" > "$WORK_DIR/$p.conf"
+		# shellcheck disable=SC2086
+		expect_reject "reconstruct-$p" "reconstruct-data.$p.output-dir" \
+			-c "$WORK_DIR/$p.conf" $REASSEMBLY -t "$PCAP"
+		#a -X on a block the conf left out has no field to write to
+		sed "/^reconstruct-data $p {/,/^}/d" "$CONF" > "$WORK_DIR/no-$p.conf"
+		expect_reject "reconstruct-$p-x-no-block" "reconstruct-data $p" \
+			-c "$WORK_DIR/no-$p.conf" \
+			-X "reconstruct-data.$p.output-dir=$OUT_DIR" -t "$PCAP"
+	else
+		skip "reconstruct-$p" "${P}_RECONSTRUCT_MODULE"
+	fi
+done
+
+#reconstruct-data is a titled multi block: leaving out the http or the ftp
+# block (or both) leaves its configuration NULL, and the reconstruction init
+# of a module build must take it as disabled; the remaining block is
+# enabled so its init runs with a real configuration
+sed -e '/^reconstruct-data http {/,/^}/d' \
+	-e '/reconstruct-data ftp {/,/}/ s|enable = false|enable = true output-dir = "'"$OUT_DIR"'"|' \
+	"$CONF" > "$WORK_DIR/no-http.conf"
+sed -e '/^reconstruct-data ftp {/,/^}/d' \
+	-e '/reconstruct-data http {/,/}/ s|enable = false|enable = true output-dir = "'"$OUT_DIR"'"|' \
+	"$CONF" > "$WORK_DIR/no-ftp.conf"
+sed '/^reconstruct-data [a-z]* {/,/^}/d' "$CONF" > "$WORK_DIR/no-reconstruct.conf"
+for c in no-http no-ftp no-reconstruct; do
+	# shellcheck disable=SC2086
+	expect_run "$c" -c "$WORK_DIR/$c.conf" $REASSEMBLY -t "$PCAP"
+done
 
 #a disabled file-output needs neither option: the run must not be rejected
 expect_run "disabled" \
@@ -256,13 +288,27 @@ expect_run "valid" \
 	-t "$PCAP"
 
 #its report file is really written under output-dir
-nb_run=$((nb_run + 1))
-if ls "$OUT_DIR"/*data.csv >/dev/null 2>&1; then
-	echo "PASS output-file-created"
-else
-	nb_fail=$((nb_fail + 1))
-	echo "FAIL output-file-created (no report file in $OUT_DIR)"
-fi
+expect_file() {
+	nb_run=$((nb_run + 1))
+	if ls "$1"/*"$2" >/dev/null 2>&1; then
+		echo "PASS $3"
+	else
+		nb_fail=$((nb_fail + 1))
+		echo "FAIL $3 (no report file $2 in $1)"
+	fi
+}
+expect_file "$OUT_DIR" data.csv output-file-created
+
+#outputs enabled only by -X: the global output flag was computed at parse
+# time, so no output was created and the first report crashed on it; a -X
+# output-dir is taken as is (no '/' is appended), hence the trailing '/'
+X_DIR=$WORK_DIR/x-out
+mkdir -p "$X_DIR"
+expect_run "x-enabled-output" -c "$CONF" \
+	-X file-output.enable=true -X file-output.output-file=x.csv \
+	-X file-output.output-dir="$X_DIR/" -X session-report.enable=true \
+	-t "$PCAP"
+expect_file "$X_DIR" x.csv x-output-file-created
 
 echo "check_file_output_unset: $((nb_run - nb_fail))/$nb_run runs passed${nb_skip:+, $nb_skip skipped}"
 [ "$nb_fail" -eq 0 ]
