@@ -68,7 +68,6 @@ fail() {
 }
 
 [ -x "$PROBE" ] || fail "probe binary not found or not executable: $PROBE"
-command -v python3 > /dev/null || fail "python3 is required"
 
 VERSION=$("$PROBE" -v 2>&1) || fail "'$PROBE -v' failed: $VERSION"
 case $VERSION in
@@ -85,6 +84,11 @@ esac
 MMT_BASE=$(printf '%s\n' "$VERSION" | sed -n 's/^- MMT_BASE: //p')
 if ! ls "${MMT_BASE:-/opt/mmt}"/security/rules/13.*.so > /dev/null 2>&1; then
 	echo "SKIP alert-delivery (rule 13 of MMT-Security not installed under ${MMT_BASE:-/opt/mmt}/security/rules)"
+	exit 0
+fi
+#gen_pcap.py builds the capture whose last packets raise the alerts
+if ! command -v python3 > /dev/null; then
+	echo "SKIP alert-delivery (python3 not found)"
 	exit 0
 fi
 
