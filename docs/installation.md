@@ -261,7 +261,8 @@ Option:
    -X attr=value    : Override configuration attributes.
                        For example "-X file-output.enable=true -Xfile-output.output-dir=/tmp/" will enable output to file and change output directory to /tmp.
                        The parameter -X can appear several times.
-                       A value is parsed as in the configuration file, for example output.format takes CSV or JSON, case-insensitive (empty means CSV).
+                       An option that takes a name (see -x) takes the same names as in the configuration file, not a number: output.format takes CSV or JSON, case-insensitive (empty means CSV).
+                       A boolean option takes true, in lower case: any other value means false.
    -x               : Prints list of configuration attributes being able to be used with -X, with their type or accepted values, then exits.
    -h               : Prints this help, then exits.
 ```
