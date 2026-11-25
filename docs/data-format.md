@@ -275,6 +275,22 @@ This reports security problems detected by MMT-Security
 10,123,"eth1",1452523000.331799,4,"detected","attack","Two successive TCP SYN requests but with different destnation addresses.",{"event_12":{"timestamp":1452523000.158154,"description":"SYN request","attributes":[["ip.src","192.168.0.20"],["ip.dst","67.196.156.65"],["tcp.flags","2"]]},"event_13":{"timestamp":1452523000.329879,"description":"SYN request","attributes":[["ip.src","192.168.0.20"],["ip.dst","66.235.120.127"],["tcp.flags","2"]]}}
 ```
 
+### Alerts at the end of an offline capture
+
+Every alert that MMT-Security raises is written before the probe exits,
+including the alerts raised by the last packets of a capture: each worker
+drains its security threads before its output is closed. The final
+statistics give the number of alerts raised (`... generated N alerts`),
+which is the number of security reports written. `make test-alert-delivery`
+checks this over repeated runs.
+
+With `thread-nb` greater than 1, a rule that keeps state shared by the
+security threads of all the workers, such as rule 56 (SYN flood), can raise
+an alert on some runs of the same capture and not on others: each worker
+processes its share of the packets at its own pace, so the shared state sees
+packet time advance in a different order on every run. Use `thread-nb = 0`
+or `1` when an offline analysis must give the same alerts on every run.
+
 ### STIX 2.1 alternative output (compile-time flag `STIX_FORMAT`)
 
 When mmt-probe is built with `make STIX_FORMAT=1` (needs `libuuid` >= 2.31
