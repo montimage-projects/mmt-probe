@@ -19,9 +19,18 @@ If no configuration file is found, MMT-Probe will stop its execution.
 new from v1.5.11:
 
 - `TCP`
+- `INTERNET`: alias of `TCP`
 - `UDP`
 - `UNIX`
 - `BOTH` = `TCP` + `UNIX`
+
+
+## `output.format`
+
+- `CSV` (default, also used when the value is empty)
+- `JSON`
+
+The values are case-insensitive and select the format of the reports written to every output channel.
 
 
 ## `event-report`

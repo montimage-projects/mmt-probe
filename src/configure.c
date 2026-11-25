@@ -450,6 +450,11 @@ static inline long int _cfg_getint( cfg_t *cfg, const char *ident, long int min,
 	return val;
 }
 
+//a parameter a parser refused - e.g., an out-of-range snap-len - rejects
+// the whole configuration: conf_load_from_file() reports it as NULL, so
+// the caller exits cleanly instead of dying by abort()
+static bool _conf_refused = false;
+
 static inline input_source_conf_t * _parse_input_source( cfg_t *cfg ){
 	cfg = _get_first_cfg_block( cfg, "input" );
 	if( cfg == NULL )
@@ -481,11 +486,16 @@ static inline input_source_conf_t * _parse_input_source( cfg_t *cfg ){
 #endif
 
 	//snap-len is bounded by libpcap's maximum record size: a negative or
-	// bigger value is a configuration error, not a value to wrap
+	// bigger value is a configuration error, not a value to wrap - it
+	// refuses the whole configuration instead of dying by abort()
 	const long int snap_len = cfg_getint( cfg, "snap-len" );
-	ASSERT( snap_len >= 0 && snap_len <= PCAP_FILE_SNAP_LEN_MAX,
-		"Unexpected value %ld for 'input.snap-len': expect a number from 0 to %d",
-		snap_len, PCAP_FILE_SNAP_LEN_MAX );
+	if( snap_len < 0 || snap_len > PCAP_FILE_SNAP_LEN_MAX ){
+		log_write( LOG_ERR, "Unexpected value %ld for 'input.snap-len': expect a number from 0 to %d",
+			snap_len, PCAP_FILE_SNAP_LEN_MAX );
+		mmt_probe_free( ret );
+		_conf_refused = true;
+		return NULL;
+	}
 	ret->snap_len    = snap_len;
 	ret->buffer_size = cfg_getint( cfg, "buffer-size" );
 	ret->timeout     = cfg_getint( cfg, "timeout" );
@@ -523,9 +533,13 @@ static inline pcap_dump_conf_t *_parse_dump_to_file( cfg_t *cfg ){
 	ret->retained_files_count = cfg_getint( cfg, "retain-files" );
 	//same bound as input.snap-len: the value goes to the pcap file header
 	const long int snap_len = cfg_getint( cfg, "snap-len" );
-	ASSERT( snap_len >= 0 && snap_len <= PCAP_FILE_SNAP_LEN_MAX,
-		"Unexpected value %ld for 'dump-pcap.snap-len': expect a number from 0 to %d",
-		snap_len, PCAP_FILE_SNAP_LEN_MAX );
+	if( snap_len < 0 || snap_len > PCAP_FILE_SNAP_LEN_MAX ){
+		log_write( LOG_ERR, "Unexpected value %ld for 'dump-pcap.snap-len': expect a number from 0 to %d",
+			snap_len, PCAP_FILE_SNAP_LEN_MAX );
+		mmt_probe_free( ret );
+		_conf_refused = true;
+		return NULL;
+	}
 	ret->snap_len = snap_len;
 
 	ret->protocols_size = cfg_size( cfg, "protocols");
@@ -1210,6 +1224,7 @@ void conf_update_output_enable( output_conf_t *outputs ){
 						|| (outputs->mongodb != NULL && outputs->mongodb->is_enable)
 						|| (outputs->redis != NULL && outputs->redis->is_enable)
 						|| (outputs->kafka != NULL && outputs->kafka->is_enable )
+						|| (outputs->mqtt != NULL && outputs->mqtt->is_enable )
 						|| (outputs->socket != NULL && outputs->socket->is_enable ));
 }
 
@@ -1226,6 +1241,7 @@ probe_conf_t* conf_load_from_file( const char* filename ){
 		return NULL;
 	}
 
+	_conf_refused = false;
 	probe_conf_t *conf = mmt_alloc( sizeof( probe_conf_t ) );
 
 	conf->probe_id     = cfg_getint(cfg, "probe-id");
@@ -1288,6 +1304,13 @@ probe_conf_t* conf_load_from_file( const char* filename ){
 	conf->reconstructions.http = _parse_reconstruct_data_block(cfg, "http");
 	cfg_free( cfg );
 
+	//a parser refused a parameter value: the whole configuration is
+	// rejected - the caller exits cleanly (the error was already logged)
+	if( _conf_refused || conf->input == NULL ){
+		conf_release( conf );
+		return NULL;
+	}
+
 	//validate default values
 	if( conf->reports.cpu_mem->frequency == 0 )
 		conf->reports.cpu_mem->frequency = 5;
@@ -1347,9 +1370,12 @@ void conf_release( probe_conf_t *conf){
 
 	int i;
 
-	mmt_probe_free( conf->input->input_source );
-	mmt_probe_free( conf->input->pcap_filter );
-	mmt_probe_free( conf->input );
+	//input is NULL on a refused configuration (e.g., a bad snap-len)
+	if( conf->input ){
+		mmt_probe_free( conf->input->input_source );
+		mmt_probe_free( conf->input->pcap_filter );
+		mmt_probe_free( conf->input );
+	}
 
 	for( i=0; i<conf->reports.events_size; i++ )
 		_free_event_report( &conf->reports.events[i] );

@@ -21,6 +21,8 @@ enum{
 	DYN_CONF_CMD_REPLY_OK = 0,
 	DYN_CONF_CMD_REPLY_CHILD_RUNNING = 1,
 	DYN_CONF_CMD_REPLY_CHILD_STOPPING = 1,
+	//a command parameter was refused (e.g., an UPDATE that cannot be applied)
+	DYN_CONF_CMD_REPLY_ERROR = 2,
 	DYN_CONF_CMD_REPLY_DO_NOTHING = 1000
 };
 

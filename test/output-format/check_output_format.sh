@@ -22,9 +22,9 @@
 #     checked for them) and refuse a number with the same kind of error.
 #
 # '-X output.format=' (an empty value) is checked to mean CSV, as an empty
-# 'format' does in the file. main.c also logs "not well-formatted ...
-# Ignored it" for it although the value is applied: that message is
-# issue #40's, not checked here.
+# 'format' does in the file: an empty value after '=' is applied, only a
+# missing '=' warns "not well-formatted ... Ignored it" and skips the
+# parameter (issue #40).
 #
 # On the unfixed code the refusals do not name the accepted values and -x
 # prints '(uint16_t)', so the check fails.
@@ -252,9 +252,10 @@ for v in 0 1 2 XML csvx; do
 		"Unexpected value [$v] for [output.format]: expect $FORMAT_VALUES" \
 		CSV -X "output.format=$v"
 done
-#the configuration file refuses them too, with the parser's own error
+#the configuration file refuses them too, with the parser's own error and
+# a clean exit 1 (issue #40: it used to die by abort(), status 134)
 for v in 0 1 XML; do
-	expect_reject "conf-invalid-$v" nonzero \
+	expect_reject "conf-invalid-$v" 1 \
 		"Invalid '$v' for option 'format'. Expect $FORMAT_VALUES." "$v"
 done
 

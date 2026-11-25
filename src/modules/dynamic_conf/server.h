@@ -25,6 +25,8 @@ enum{
 	CMD_SUCCESS      = 0,
 	CMD_SYNTAX_ERROR = 1,
 	CMD_OVER_SIZE    = 2,
+	//the command is well-formed but its parameter was refused
+	CMD_INTERNAL_ERROR = 3,
 };
 
 /**

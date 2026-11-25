@@ -247,6 +247,19 @@ test-output-format: compile
 	@echo "[TEST] output.format and enum-like -X values"
 	$(QUIET) sh $(TOP_DIR)/test/output-format/check_output_format.sh $(TOP_DIR)/$(APP)
 
+# MQTT counted in conf_update_output_enable() (issue #40): an MQTT-only
+# enabled output was dropped from the "any output enabled" flag, leaving
+# context->output NULL. The check runs a conf whose only enabled channel is
+# an MQTT broker that refuses the connection: the output must exist
+# (reports reach stdout; on an MQTT_MODULE build the failed connect is
+# logged, not fatal), and disabling it in the file stays clean. The
+# compile prerequisite keeps a parallel `make -j test` on a clean tree
+# from racing the build.
+.PHONY: test-mqtt-output
+test-mqtt-output: compile
+	@echo "[TEST] mqtt-only output enable"
+	$(QUIET) sh $(TOP_DIR)/test/mqtt-output/check_mqtt_output.sh $(TOP_DIR)/$(APP)
+
 # system-report.output-channel (issue #43): declared CHAR_STAR over an
 # output_channel_conf_t field, so a -X override freed and cloned a string
 # into the enum and died by SIGSEGV. Declared LIST like the other
@@ -278,5 +291,5 @@ test-alert-delivery: compile
 	$(QUIET) sh $(TOP_DIR)/test/alert-delivery/check_alert_delivery.sh $(TOP_DIR)/$(APP)
 
 .PHONY: test
-test: test-stix test-report-overflow-stix test-snaplen test-crash test-report-overflow test-dynconf-reply test-online-signals test-errno-signal test-hash test-file-output-unset test-output-format test-sysreport-channel test-alert-delivery
+test: test-stix test-report-overflow-stix test-snaplen test-crash test-report-overflow test-dynconf-reply test-online-signals test-errno-signal test-hash test-file-output-unset test-output-format test-sysreport-channel test-alert-delivery test-mqtt-output
 	@:
