@@ -45,11 +45,21 @@ typedef struct identity_struct{
 const identity_t* conf_get_identity_from_string( const char * ident_str );
 
 /**
+ * The return values of conf_override_element()
+ */
+typedef enum{
+	CONF_OVERRIDE__UNKNOWN_IDENT = -1, //the parameter name does not exist
+	CONF_OVERRIDE__OK            = 0,  //the value was applied
+	CONF_OVERRIDE__REFUSED       = 1,  //the value was refused
+	CONF_OVERRIDE__NO_BLOCK      = 2   //the parameter's block is absent from the configuration
+} conf_override_ret_t;
+
+/**
  * Override an attribute in configuration.
  * @param
  * @param ident: identifier of element will be overridden.
  * @param value: value will be overridden only if the value is different with the current one of the element.
- * @return 0 if the value has been overridden, otherwise false
+ * @return a conf_override_ret_t value
  */
 int conf_override_element( probe_conf_t*, const char* ident, const char *value );
 

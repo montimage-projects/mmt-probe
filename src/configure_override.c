@@ -66,27 +66,21 @@ const char* conf_validate_data_value( const identity_t *ident, const char *data_
 	int enum_val = 0;
 	uint32_t u32_val;
 
+	//an enum-like parameter takes a name, not the number of its storage
+	// type: its parser accepts exactly the values the configuration file
+	// does - checked before the storage type below
+	const enum_parameter_t *enum_param = _get_enum_parameter( ident->val );
+	if( enum_param != NULL ){
+		if( enum_param->parse( &enum_val, data_value ) )
+			return NULL;
+		snprintf( error_reason, sizeof( error_reason),
+				"Unexpected value [%s] for [%s]: expect %s",
+				data_value, ident->ident, enum_param->values );
+		return error_reason;
+	}
+
 	//special data type
 	switch( ident->val ){
-	//input
-	case CONF_ATT__INPUT__MODE:
-		if( conf_parse_input_mode( &enum_val, data_value ) )
-			return NULL;
-		else{
-			snprintf( error_reason, sizeof( error_reason), "Unexpected value [%s] for [%s]", data_value, ident->ident );
-			return error_reason;
-		}
-		break;
-//#ifdef SECURITY_MODULE
-//	case CONF_ATT__SECURITY__INGORE_REMAIN_FLOW:
-//		if( conf_parse_security_ignore_mode( &enum_val, data_value ) )
-//			return NULL;
-//		else{
-//			snprintf( error_reason, sizeof( error_reason), "Unexpected value [%s] for [%s]", data_value, ident->ident );
-//			return error_reason;
-//		}
-//		break;
-//#endif
 	case CONF_ATT__INPUT__SNAP_LEN:
 #ifdef PCAP_DUMP_MODULE
 	case CONF_ATT__DUMP_PCAP__SNAP_LEN:
@@ -120,7 +114,7 @@ const char* conf_validate_data_value( const identity_t *ident, const char *data_
 		while( data_value[i] != '\0' ){
 			if( data_value[i] < '0' || data_value[i] > '9' ){
 				snprintf( error_reason, sizeof( error_reason), "Expect a number as value of '%s' (not '%s')", ident->ident, data_value );
-				return 0;
+				return error_reason;
 			}
 			i ++;
 		}
@@ -160,18 +154,18 @@ static inline bool _is_block_missing( const probe_conf_t *conf, const identity_t
 	return true;
 }
 
-static inline bool _override_element_by_ident( probe_conf_t *conf, const identity_t *ident, const char *value_str ){
+static inline conf_override_ret_t _override_element_by_ident( probe_conf_t *conf, const identity_t *ident, const char *value_str ){
 	uint32_t int_val = 0;
 	int i;
 	DEBUG("Updating %s to %s", ident->ident, value_str );
 	if( _is_block_missing( conf, ident ) )
-		return false;
+		return CONF_OVERRIDE__NO_BLOCK;
 	void *field_ptr = conf_get_ident_attribute_field(conf, ident->val );
 	int enum_val = 0;
 
 	if( field_ptr == NULL ){
 		log_write( LOG_WARNING, "Have not supported yet for [%s]", ident->ident );
-		return false;
+		return CONF_OVERRIDE__REFUSED;
 	}
 	char **string_ptr;
 
@@ -181,10 +175,10 @@ static inline bool _override_element_by_ident( probe_conf_t *conf, const identit
 		if( ! enum_param->parse( &enum_val, value_str ) ){
 			log_write( LOG_WARNING, "Unexpected value [%s] for [%s]: expect %s",
 					value_str, ident->ident, enum_param->values );
-			return false;
+			return CONF_OVERRIDE__REFUSED;
 		}
 		*((int *)field_ptr) = enum_val;
-		return true;
+		return CONF_OVERRIDE__OK;
 	}
 
 	//special data type
@@ -199,13 +193,13 @@ static inline bool _override_element_by_ident( probe_conf_t *conf, const identit
 		if( ! conf_parse_snap_len( &int_val, value_str ) ){
 			log_write( LOG_WARNING, "Unexpected value [%s] for [%s]: expect a number from 0 to %d",
 					value_str, ident->ident, PCAP_FILE_SNAP_LEN_MAX );
-			return false;
+			return CONF_OVERRIDE__REFUSED;
 		}
 		//value does not change ==> do nothing
 		if( int_val == *((uint32_t *)field_ptr) )
-			return true;
+			return CONF_OVERRIDE__OK;
 		*((uint32_t *)field_ptr) = int_val;
-		return true;
+		return CONF_OVERRIDE__OK;
 	default:
 		break;
 	}
@@ -214,15 +208,15 @@ static inline bool _override_element_by_ident( probe_conf_t *conf, const identit
 	//update value depending on parameters
 	case NO_SUPPORT:
 		log_write( LOG_WARNING, "Have not supported yet for [%s]", ident->ident );
-		return false;
+		return CONF_OVERRIDE__REFUSED;
 	case CHAR_STAR:
 		string_ptr = (char **) field_ptr;
 		//value does not change ==> do nothing
 		if( *string_ptr && IS_EQUAL_STRINGS( *string_ptr, value_str ) )
-			return true;
+			return CONF_OVERRIDE__OK;
 		mmt_probe_free( *string_ptr );
 		*string_ptr = mmt_strdup( value_str );
-		return true;
+		return CONF_OVERRIDE__OK;
 	case LIST:
 		switch( ident->val ){
 #ifdef SECURITY_MODULE
@@ -234,9 +228,9 @@ static inline bool _override_element_by_ident( probe_conf_t *conf, const identit
 		case CONF_ATT__RADIUS_REPORT__OUTPUT_CHANNEL:
 			int_val = conf_parse_output_channel( value_str );
 			if( int_val == *(output_channel_conf_t *) field_ptr )
-				return true;
+				return CONF_OVERRIDE__OK;
 			(*(output_channel_conf_t *) field_ptr) = int_val;
-			return true;
+			return CONF_OVERRIDE__OK;
 
 #ifdef PCAP_DUMP_MODULE
 		case CONF_ATT__DUMP_PCAP__PROTOCOLS:
@@ -252,7 +246,7 @@ static inline bool _override_element_by_ident( probe_conf_t *conf, const identit
 			}
 
 			conf->reports.pcap_dump->protocols_size = conf_parse_list( value_str, &conf->reports.pcap_dump->protocols );
-			return true;
+			return CONF_OVERRIDE__OK;
 #endif
 		}
 		break;
@@ -260,33 +254,33 @@ static inline bool _override_element_by_ident( probe_conf_t *conf, const identit
 		int_val = _parse_bool( value_str );
 		//value does not change => do nothing
 		if( int_val == *((bool *)field_ptr) )
-			return true;
+			return CONF_OVERRIDE__OK;
 		//update value
 		*((bool *)field_ptr) = int_val;
-		return true;
+		return CONF_OVERRIDE__OK;
 
 
 	case UINT16_T:
 		int_val = atoi( value_str );
 		//value does not change ==> do nothing
 		if( int_val == *((uint16_t *)field_ptr) )
-			return true;
+			return CONF_OVERRIDE__OK;
 		*((uint16_t *)field_ptr) = int_val;
-		return true;
+		return CONF_OVERRIDE__OK;
 
 	case UINT32_T:
 		int_val = atol( value_str );
 		//value does not change ==> do nothing
 		if( int_val == *((uint32_t *)field_ptr) )
-			return true;
+			return CONF_OVERRIDE__OK;
 		*((uint32_t *)field_ptr) = int_val;
-		return true;
+		return CONF_OVERRIDE__OK;
 	default:
 		break;
 	}
 
 	log_write( LOG_ERR, "Unknown identifier '%s'", ident->ident );
-	return false;
+	return CONF_OVERRIDE__REFUSED;
 }
 
 
@@ -303,11 +297,9 @@ int conf_override_element( probe_conf_t *conf, const char *ident_str, const char
 
 	if( ident == NULL ){
 		log_write( LOG_WARNING, "Unknown parameter identity [%s]", ident_str );
-		return -1;
+		return CONF_OVERRIDE__UNKNOWN_IDENT;
 	}
-	if( _override_element_by_ident(conf, ident, value_str ) )
-		return 0;
-	return 1;
+	return _override_element_by_ident(conf, ident, value_str );
 }
 
 bool conf_override_element_by_id( probe_conf_t *conf, int ident_val, const char *value_str ){
@@ -317,7 +309,7 @@ bool conf_override_element_by_id( probe_conf_t *conf, int ident_val, const char 
 		log_write( LOG_WARNING, "Unknown parameter identity [%d]", ident_val );
 		return false;
 	}
-	return _override_element_by_ident(conf, ident, value_str );
+	return _override_element_by_ident(conf, ident, value_str ) == CONF_OVERRIDE__OK;
 }
 
 

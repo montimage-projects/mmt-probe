@@ -63,11 +63,16 @@ static int _receive_message( const char *message, size_t message_size, void *use
 
 		//do we need to restart the processing process to take into account the parameters ???
 		is_need_to_restart = false;
+		//a parameter that cannot be applied - an unknown one, a refused
+		// value or one whose block is absent - is reported to the client
+		// instead of being silently acknowledged
+		bool is_refused = false;
 
 		for( i=0; i<size; i++ ){
 			//update the config in the main process.
 			//this update will be transfered to its children once they are created (by using fork)
-			conf_override_element_by_id( config, params[i].ident, params[i].data );
+			if( ! conf_override_element_by_id( config, params[i].ident, params[i].data ) )
+				is_refused = true;
 
 			//do we need to restart the processing process to take into account this parameter??
 			if( dynamic_conf_need_to_restart_to_update( params[i].ident ) )
@@ -78,20 +83,13 @@ static int _receive_message( const char *message, size_t message_size, void *use
 
 		//the child processing process is running
 		//if need to restart the child to take into account the parameters
-		if( *pid > 0 && is_need_to_restart ){
+		if( *pid > 0 && is_need_to_restart )
 			//tell it to restart
 			kill( *pid, SIGRES );
-			//take in charge the command
-			return DYN_CONF_CMD_REPLY_OK;
-		}
 
-		//the processing process is not running => this process will take in charge the command
-		if( *pid < 0 ){
-			//take in charge the command
-			return DYN_CONF_CMD_REPLY_OK;
-		}
-
-		break;
+		//a definitive reply - never DO_NOTHING - so a client waiting for
+		// one always gets the verdict of this process
+		return is_refused ? DYN_CONF_CMD_REPLY_ERROR : DYN_CONF_CMD_REPLY_OK;
 
 	default: //must not happen
 		log_write( LOG_ERR, "Command is not supported: %d", cmd->id );

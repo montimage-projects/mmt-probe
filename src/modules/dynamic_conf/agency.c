@@ -31,7 +31,10 @@ static int _receive_message( const char *message, size_t message_size, void *use
 	switch( cmd->id ){
 	case DYN_CONF_CMD_UPDATE:
 		parse_command_parameters( cmd->parameter, cmd->parameter_length, params, size );
-		return DYN_CONF_CMD_REPLY_OK;
+		//the parameters are applied - and refused - by the main process,
+		// which owns the verdict replied to the client: this process marks
+		// the message consumed but has nothing to reply
+		return DYN_CONF_CMD_REPLY_DO_NOTHING;
 		break;
 	}
 	return DYN_CONF_CMD_REPLY_DO_NOTHING;

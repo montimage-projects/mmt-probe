@@ -418,8 +418,11 @@ static inline void _processing( int sock ) {
 	log_write( LOG_INFO, "Publish command id %d (%s)", command.id, cmd_str);
 
 	//4: 2bytes of id + 2bytes of paramter_length
+	//an UPDATE blocks until a subscriber applied - or refused - its
+	// parameters so the refusal reaches the client; the other commands
+	// stay fire-and-forget
 	ret = mmt_bus_publish((char *) &command, 4 + command.parameter_length,
-			NULL);
+			command.id == DYN_CONF_CMD_UPDATE ? &reply_code : NULL );
 
 	switch (ret) {
 	case MSG_BUS_OLD_MSG_NO_CONSUME:
@@ -427,8 +430,13 @@ static inline void _processing( int sock ) {
 				"Old message is not consumed. Need to wait then resend again.");
 		break;
 	case MMT_BUS_SUCCESS:
-		_reply(sock, CMD_SUCCESS, "Successfully processed the command: %s\n",
-				cmd_str);
+		if( command.id == DYN_CONF_CMD_UPDATE
+				&& reply_code != DYN_CONF_CMD_REPLY_OK )
+			_reply(sock, CMD_INTERNAL_ERROR,
+					"The update command was refused\n");
+		else
+			_reply(sock, CMD_SUCCESS, "Successfully processed the command: %s\n",
+					cmd_str);
 		break;
 	}
 
