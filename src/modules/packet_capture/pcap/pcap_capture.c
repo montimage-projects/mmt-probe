@@ -147,9 +147,11 @@ static void *_worker_thread( void *arg){
 	worker_on_start( worker_context );
 
 
-	struct timeval now; //current timestamp that is either
+	struct timeval now = { .tv_sec = 0, .tv_usec = 0 }; //current timestamp that is either
 				//- real timestamp of system when running online
 	 	 	 	//- packet timestamp when running offline
+	//offline, `now` is meaningful only after a first packet set it
+	bool have_ts = false;
 
 	while( true ){
 		//get number of packets being available
@@ -161,9 +163,14 @@ static void *_worker_thread( void *arg){
 			//we do not use packet timestamp for online analysis as
 			// there may be exist some moment having no packets => output will be blocked until a new packet comes
 			//get the current timestamp of system
-			if( config->input->input_mode == ONLINE_ANALYSIS )
+			if( config->input->input_mode == ONLINE_ANALYSIS ){
 				gettimeofday( &now, NULL );
-			worker_update_timer( worker_context, &now );
+				worker_update_timer( worker_context, &now );
+			}
+			//offline, the timers only see packet time: an empty ring before
+			// the first packet does not advance them (`now` is not set yet)
+			else if( have_ts )
+				worker_update_timer( worker_context, &now );
 
 			//=> sleep 100 micro-second
 			nanosleep( (const struct timespec[]){{0, 100000L}}, NULL );
@@ -186,7 +193,8 @@ static void *_worker_thread( void *arg){
 			if( unlikely( pkt_header->len == BREAK_PCAP_NUMBER ))
 				break;
 			else{
-				now = pkt_header->ts;
+				now      = pkt_header->ts;
+				have_ts  = true;
 				worker_process_a_packet( worker_context, pkt_header, (u_char *)(pkt_header + 1) );
 				worker_update_timer( worker_context, &pkt_header->ts );
 			}
@@ -273,7 +281,7 @@ static inline void _print_traffic_statistics( const ms_timer_t *timer, void *arg
 static void _got_a_packet(u_char* user, const struct pcap_pkthdr *pcap_header, const u_char *pcap_data){
 	probe_context_t *context   = ( probe_context_t *)user;
 	const probe_conf_t *config = context->config;
-	struct timeval now;
+	struct timeval now = { .tv_sec = 0, .tv_usec = 0 };
 	//when having packet data to process
 	if( pcap_data != NULL ){
 		if( IS_SMP_MODE( context )){
@@ -305,6 +313,10 @@ static void _got_a_packet(u_char* user, const struct pcap_pkthdr *pcap_header, c
 	//get the current timestamp of system
 	if( config->input->input_mode == ONLINE_ANALYSIS )
 		gettimeofday( &now, NULL );
+	else if( pcap_data == NULL )
+		//offline, the timers only see packet time: with no packet there is
+		// no timestamp to advance them to (`now` was never set)
+		return;
 
 
 	worker_context_t *worker_context = context->smp[0];
