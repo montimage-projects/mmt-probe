@@ -71,8 +71,9 @@ nb_fail=0
 nb_run=0
 nb_skip=0
 
-#a run that must be rejected: exit non-zero, print an error naming the
-# required 'section.key' option, and never crash nor process packets
+#a run that must be rejected: exit status 1 - a refused configuration
+# exits cleanly, never the 134 of the old abort() - print an error naming
+# the required 'section.key' option, and never crash nor process packets
 expect_reject() {
 	# $1: case name, $2: the 'section.key' the error must name;
 	# remaining arguments are passed to the probe
@@ -85,7 +86,7 @@ expect_reject() {
 	rc=$?
 
 	problems=""
-	[ "$rc" -ne 0 ] || problems="$problems exit=$rc"
+	[ "$rc" -eq 1 ] || problems="$problems exit=$rc"
 	grep -qF "$key" "$log"   || problems="$problems no-error-for-$key"
 	grep -q "reached to the end of pcap file" "$log" \
 		&& problems="$problems ran-anyway"
@@ -254,6 +255,16 @@ for p in ftp http; do
 		expect_reject "reconstruct-$p-x-no-block" "reconstruct-data $p" \
 			-c "$WORK_DIR/no-$p.conf" \
 			-X "reconstruct-data.$p.output-dir=$OUT_DIR" -t "$PCAP"
+		#the error names the missing block; a generic "Unexpected parameter
+		# value" on top of it would wrongly blame the value (issue #40)
+		nb_run=$((nb_run + 1))
+		if grep -q "Unexpected parameter value" \
+				"$WORK_DIR/reject-reconstruct-$p-x-no-block.log"; then
+			nb_fail=$((nb_fail + 1))
+			echo "FAIL reconstruct-$p-x-no-block-msg: misleading 'Unexpected parameter value' line"
+		else
+			echo "PASS reconstruct-$p-x-no-block-msg"
+		fi
 	else
 		skip "reconstruct-$p" "${P}_RECONSTRUCT_MODULE"
 	fi
@@ -309,6 +320,19 @@ expect_run "x-enabled-output" -c "$CONF" \
 	-X file-output.output-dir="$X_DIR/" -X session-report.enable=true \
 	-t "$PCAP"
 expect_file "$X_DIR" x.csv x-output-file-created
+
+#-X with no '=' warns "not well-formatted" and skips the parameter
+# (issue #40): the conf value stands and the run is clean. On the unfixed
+# code the warning lied - the empty "value" was applied and then refused,
+# so the run exits 1 instead.
+expect_run "x-no-equals" -c "$CONF" -X input.mode -t "$PCAP"
+nb_run=$((nb_run + 1))
+if grep -q "not well-formatted" "$WORK_DIR/run-x-no-equals.log"; then
+	echo "PASS x-no-equals-warn"
+else
+	nb_fail=$((nb_fail + 1))
+	echo "FAIL x-no-equals-warn: no 'not well-formatted' warning"
+fi
 
 echo "check_file_output_unset: $((nb_run - nb_fail))/$nb_run runs passed${nb_skip:+, $nb_skip skipped}"
 [ "$nb_fail" -eq 0 ]

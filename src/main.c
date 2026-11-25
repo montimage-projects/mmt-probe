@@ -168,20 +168,21 @@ static inline probe_conf_t* _parse_options( int argc, char ** argv ) {
 	if( config_file ){
 		conf = conf_load_from_file( config_file );
 		if( conf == NULL )
-			abort();
+			//the parse error was already reported: exit 1, not a crash
+			exit( EXIT_FAILURE );
 	}else{
 		// load ./mmt-probe.conf if it is existing
 		if( _is_file_exists( DEFAULT_CONFIG_FILE) ){
 			config_file = DEFAULT_CONFIG_FILE;
 			conf = conf_load_from_file( config_file );
 			if( conf == NULL )
-				abort();
+				exit( EXIT_FAILURE );
 		} else {
 			//try again to read config from /opt/mmt/probe/mmt-probe.conf
 			config_file = DEFAULT_CONFIG_FILE_OPT;
 			conf = conf_load_from_file( config_file );
 			if( conf == NULL )
-				abort();
+				exit( EXIT_FAILURE );
 		}
 	}
 
@@ -213,29 +214,32 @@ static inline probe_conf_t* _parse_options( int argc, char ** argv ) {
 			//   string_val = "true"
 			string_att = optarg;
 			string_val = optarg;
-			while( *string_val != '\0' ){
-				//separated by = character
-				if( *string_val == '=' ){
-					*string_val = '\0'; //NULL ended for attribute
-					//jump to the part after = character
-					string_val ++;
-					break;
-				}
+			while( *string_val != '\0' && *string_val != '=' )
 				string_val ++;
-			}
-			//not found = character
-			if( *string_val == '\0' )
+			//not found = character: the parameter is ignored - an empty
+			// value after '=' is not: it is applied like any other value
+			if( *string_val == '\0' ){
 				log_write( LOG_WARNING, "Input parameter '%s' is not well-formatted (must be in format parameter=value). Ignored it.", string_att );
+				break;
+			}
+			*string_val = '\0'; //NULL ended for attribute
+			string_val ++;      //jump to the part after = character
 
 			switch( conf_override_element(conf, string_att, string_val) ){
-			case 0:
+			case CONF_OVERRIDE__OK:
 				log_write( LOG_INFO, "Overridden value of configuration parameter '%s' by '%s'", string_att, string_val );
 				break;
-			case 1: //value is incorrect
+			case CONF_OVERRIDE__REFUSED: //value is incorrect
 				fprintf(stderr, "Unexpected parameter value %s\n", string_val );
 				exit( 1 );
 				break;
-			case -1:  //ident is incorrect
+			case CONF_OVERRIDE__NO_BLOCK:
+				//the precise error - naming the missing block - was already
+				// notified; a generic "Unexpected parameter value" would
+				// wrongly blame the value
+				exit( 1 );
+				break;
+			case CONF_OVERRIDE__UNKNOWN_IDENT:  //ident is incorrect
 				fprintf(stderr, "Unknown parameter identity %s\n", string_att );
 				exit( 1 );
 				break;
@@ -246,7 +250,8 @@ static inline probe_conf_t* _parse_options( int argc, char ** argv ) {
 	}
 
 	if( conf_validate(conf) ){
-		abort();
+		//the error was already reported: exit 1, not a crash
+		exit( EXIT_FAILURE );
 	}
 
 	return conf;
