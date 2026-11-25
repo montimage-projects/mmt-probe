@@ -6,17 +6,33 @@
  */
 
 #include <MQTTClient.h>
+#include <time.h>
 #include "mqtt_output.h"
 #include "../../../lib/log.h"
 #include "../../../lib/malloc.h"
+
+//a dead channel retries the broker no faster than this interval, so a
+// connect that blocks up to the connect timeout cannot stall the output
+// worker for longer
+#define MQTT_RECONNECT_INTERVAL_SECONDS  10
+//reports dropped on a dead channel are counted and reported at most once
+// per this interval
+#define MQTT_DROP_LOG_INTERVAL_SECONDS   30
 
 struct mqtt_output_struct{
 	uint16_t probe_id;
 	const mqtt_output_conf_t *config;
 	MQTTClient client;
+	time_t last_connect_attempt;
+	time_t last_drop_log;
+	uint64_t dropped_reports;
 };
 
 static void _connect_to_mqtt(mqtt_output_t *context) {
+	//an already-open client must not be created a second time
+	if( context->client != NULL )
+		return;
+
 	char client_id[100];
 	snprintf(client_id, sizeof(client_id), "mmt-probe-%d", context->probe_id);
 
@@ -24,6 +40,9 @@ static void _connect_to_mqtt(mqtt_output_t *context) {
 
 	conn_opts.keepAliveInterval = 20;
 	conn_opts.cleansession = 1;
+	conn_opts.connectTimeout = 5;
+
+	context->last_connect_attempt = time( NULL );
 
 	int rc;
 
@@ -63,9 +82,26 @@ mqtt_output_t* mqtt_output_alloc_init( const mqtt_output_conf_t*config,  uint16_
 }
 
 int mqtt_output_send( mqtt_output_t *context, const char *message ){
-	//no broker was reached at init: the channel drops the message
-	if( context == NULL || context->client == NULL )
+	if( context == NULL )
 		return 0;
+
+	//the channel is down (an unreachable broker at start-up, or a lost
+	// connection): count the dropped report, warn at most once per
+	// MQTT_DROP_LOG_INTERVAL_SECONDS, and retry the connect every
+	// MQTT_RECONNECT_INTERVAL_SECONDS so a late broker is picked up
+	if( context->client == NULL ){
+		context->dropped_reports ++;
+		const time_t now = time( NULL );
+		if( now - context->last_drop_log >= MQTT_DROP_LOG_INTERVAL_SECONDS ){
+			log_write( LOG_WARNING, "MQTT channel to '%s' is down: dropped %llu report(s)",
+					context->config->address, (unsigned long long) context->dropped_reports );
+			context->last_drop_log    = now;
+			context->dropped_reports  = 0;
+		}
+		if( now - context->last_connect_attempt >= MQTT_RECONNECT_INTERVAL_SECONDS )
+			_connect_to_mqtt( context );
+		return 0;
+	}
 	MQTTClient_message pubmsg = MQTTClient_message_initializer;
 	MQTTClient_deliveryToken token;
 	int rc;
@@ -78,6 +114,10 @@ int mqtt_output_send( mqtt_output_t *context, const char *message ){
 	rc = MQTTClient_publishMessage(context->client, context->config->topic_name, &pubmsg, &token);
 	if( rc != MQTTCLIENT_SUCCESS ){
 		log_write(LOG_ERR, "Failed to publish MQTT message to '%s': %d", context->config->topic_name, rc);
+		//a dead connection goes through the same drop/reconnect path as a
+		// never-opened one
+		if( rc == MQTTCLIENT_DISCONNECTED )
+			MQTTClient_destroy( &context->client );
 		return 0;
 	}
 

@@ -31,6 +31,11 @@
 #   - out-of-range (262145), negative (-1) and non-numeric (abc) values
 #     must be rejected with a clear error and a non-zero exit, both via
 #     the -X override and via the configuration file;
+#   - the same bound applies to dump-pcap.snap-len (issue #53): a bad
+#     value is refused with a non-zero exit, and on an ASan build the
+#     refusal path must not leave allocated members behind - each
+#     expect_reject run goes out under detect_leaks=1 and a LeakSanitizer
+#     report counts as a failure;
 #   - online, the configured value must reach pcap_set_snaplen: a live
 #     capture on ONLINE_IFACE (default: lo) must log the configured value.
 #     Skipped when no interface can capture (e.g. no AF_PACKET capability
@@ -185,24 +190,30 @@ run_one() {
 }
 
 expect_reject() {
-	# $1: case name; the remaining arguments are passed to the probe.
-	# A bad input.snap-len must give a clear error naming the option and
-	# its bound, a clean exit status 1 - a refused configuration no longer
-	# dies by abort(), status 134 - and no capture run.
-	name="reject-$1"
-	shift
+	# $1: case name; $2: the option key the error message must name; the
+	# remaining arguments are passed to the probe. A refused value must
+	# give a clear error naming the option and its bound, a clean non-zero
+	# exit - a refused configuration no longer dies by abort(), status
+	# 134, and its status is not pinned to 1 - and no capture run. The
+	# run always goes out under detect_leaks=1: a LeakSanitizer report on
+	# an ASan build means the refusal path left allocated members behind.
+	name="reject-$1" key="$2"
+	shift 2
 	log="$WORK_DIR/$name.log"
 	nb_run=$((nb_run + 1))
 
+	ASAN_OPTIONS=detect_leaks=1 \
 	timeout -s KILL "$RUN_TIMEOUT" "$PROBE" "$@" >"$log" 2>&1
 	rc=$?
 
 	problems=""
-	[ "$rc" -eq 1 ] || problems="$problems exit=$rc"
-	grep -q "input.snap-len" "$log" || problems="$problems no-error-message"
-	grep -q "$SNAP_CAP" "$log"      || problems="$problems no-bound-in-message"
+	[ "$rc" -ne 0 ] || problems="$problems exit=0"
+	grep -q "$key" "$log"         || problems="$problems no-error-message"
+	grep -q "$SNAP_CAP" "$log"    || problems="$problems no-bound-in-message"
 	grep -q "reached to the end of pcap file" "$log" \
 		&& problems="$problems ran-anyway"
+	grep -qiE 'LeakSanitizer|detected memory leaks' "$log" \
+		&& problems="$problems leaked"
 
 	if [ -z "$problems" ]; then
 		echo "PASS $name (rejected, exit=$rc)"
@@ -305,12 +316,31 @@ done
 #out-of-range, negative and non-numeric values must be rejected with a
 # clear error and a non-zero exit, never silently wrapped into the field
 for bad in 262145 -1 abc 4294967296; do
-	expect_reject "s$bad" -c "$CONF" -t "$WORK_DIR/small.pcap" \
+	expect_reject "s$bad" input.snap-len -c "$CONF" -t "$WORK_DIR/small.pcap" \
 		-X input.snap-len="$bad" -X thread-nb=1
 done
 #the configuration file is checked the same way
 sed 's/snap-len.*/snap-len = 262145/' "$CONF" > "$WORK_DIR/bad-snaplen.conf"
-expect_reject "conf-file" -c "$WORK_DIR/bad-snaplen.conf" -t "$WORK_DIR/small.pcap"
+expect_reject "conf-file" input.snap-len -c "$WORK_DIR/bad-snaplen.conf" -t "$WORK_DIR/small.pcap"
+
+#dump-pcap.snap-len is bound by the same PCAP_FILE_SNAP_LEN_MAX (issue
+# #53): the refusal happens while parsing the configuration file block
+# (the -X override rejects the value earlier, without reaching the
+# leaky branch), so the block is appended to the test configuration.
+# output-dir is set so the leaked member is really allocated and the
+# detect_leaks=1 leg flags it on an ASan build
+for bad in 262145 -1; do
+	sed 's/snap-len.*/snap-len = 0/' "$CONF" > "$WORK_DIR/bad-dump-snaplen.conf"
+	cat >> "$WORK_DIR/bad-dump-snaplen.conf" <<-EOF
+	dump-pcap {
+	    enable     = false
+	    output-dir = "$WORK_DIR/dump"
+	    protocols  = {"unknown"}
+	    snap-len   = $bad
+	}
+	EOF
+	expect_reject "dump-s$bad" dump-pcap.snap-len -c "$WORK_DIR/bad-dump-snaplen.conf" -t "$WORK_DIR/small.pcap"
+done
 
 #online: a configured value up to 262144 must reach pcap_set_snaplen, and
 # snap-len = 0 keeps meaning PCAP_SNAP_LEN_MAX (65535)
