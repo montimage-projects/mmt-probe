@@ -113,7 +113,16 @@ int mqtt_output_send( mqtt_output_t *context, const char *message ){
 
 	rc = MQTTClient_publishMessage(context->client, context->config->topic_name, &pubmsg, &token);
 	if( rc != MQTTCLIENT_SUCCESS ){
-		log_write(LOG_ERR, "Failed to publish MQTT message to '%s': %d", context->config->topic_name, rc);
+		//a failed publish drops the report: count it and log at most once
+		// per MQTT_DROP_LOG_INTERVAL_SECONDS, like the dead-channel path
+		context->dropped_reports ++;
+		const time_t now = time( NULL );
+		if( now - context->last_drop_log >= MQTT_DROP_LOG_INTERVAL_SECONDS ){
+			log_write( LOG_ERR, "Failed to publish MQTT message to '%s': %d (dropped %llu report(s))",
+					context->config->topic_name, rc, (unsigned long long) context->dropped_reports );
+			context->last_drop_log   = now;
+			context->dropped_reports = 0;
+		}
 		//a dead connection goes through the same drop/reconnect path as a
 		// never-opened one
 		if( rc == MQTTCLIENT_DISCONNECTED )
