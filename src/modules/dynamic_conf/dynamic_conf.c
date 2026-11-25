@@ -73,6 +73,8 @@ static int _receive_message( const char *message, size_t message_size, void *use
 			if( dynamic_conf_need_to_restart_to_update( params[i].ident ) )
 				is_need_to_restart = true;
 		}
+		//an update may enable or disable an output channel
+		conf_update_output_enable( &config->outputs );
 
 		//the child processing process is running
 		//if need to restart the child to take into account the parameters

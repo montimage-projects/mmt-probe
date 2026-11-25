@@ -165,6 +165,20 @@ test-hash: $(HASH_TEST_BIN)
 	$(QUIET) status=0; $(HASH_TEST_BIN) || status=$$?; \
 		$(RM) $(HASH_TEST_OBJDIR) $(HASH_TEST_BIN); exit $$status
 
+# Required file/dir/descriptor options (review #35, note N3): an enabled
+# file output without output-file made file_output_alloc_init() pass NULL
+# to strlen() and die by SIGSEGV before any packet was read. Every missing
+# path - file-output/behaviour output-file and output-dir, and the
+# dump-pcap, socket-output, reconstruct-data and dynamic-config path
+# options on the builds that have those modules - must be rejected by
+# conf_validate() with an error naming the 'section.key' option, a
+# non-zero exit and no crash. The compile prerequisite keeps a parallel
+# `make -j test` on a clean tree from racing the build.
+.PHONY: test-file-output-unset
+test-file-output-unset: compile
+	@echo "[TEST] file output without output-file"
+	$(QUIET) sh $(TOP_DIR)/test/file-output-unset/check_file_output_unset.sh $(TOP_DIR)/$(APP)
+
 .PHONY: test
-test: test-snaplen test-crash test-report-overflow test-dynconf-reply test-online-signals test-errno-signal test-hash
+test: test-snaplen test-crash test-report-overflow test-dynconf-reply test-online-signals test-errno-signal test-hash test-file-output-unset
 	@:
