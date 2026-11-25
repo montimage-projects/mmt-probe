@@ -426,4 +426,16 @@ bool conf_parse_rtt_base(int *result, const char *value);
 bool conf_parse_security_ignore_mode(int *result, const char *value);
 bool conf_parse_output_socket_type(int *result, const char *value);
 bool conf_parse_output_format(int *result, const char *value);
+
+/*
+ * The values accepted by the parsers of the enum-like options above. Each
+ * list is the single description of its parser: the configuration-file
+ * errors, the -X errors and the -x listing all print it, so they cannot
+ * drift from one another.
+ */
+#define CONF_INPUT_MODE_VALUES                  "ONLINE or OFFLINE"
+#define CONF_RTT_BASE_VALUES                    "SENDER, CAPTOR or PREFER_SENDER"
+#define CONF_OUTPUT_FORMAT_VALUES               "CSV or JSON, case-insensitive (empty means CSV)"
+#define CONF_SOCKET_TYPE_VALUES                 "UNIX, TCP (alias INTERNET), UDP or BOTH"
+#define CONF_SECURITY_IGNORE_REMAIN_FLOW_VALUES "NONE (alias false), SECURITY (alias true) or DPI"
 #endif /* SRC_LIB_CONFIGURE_H_ */

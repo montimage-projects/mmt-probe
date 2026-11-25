@@ -42,6 +42,14 @@ Any configuration parameter can be overridden at runtime:
 ./probe -i eth0 -Xfile-output.enable=true -Xfile-output.output-dir=/tmp/
 ```
 
+An option that takes a name (see -x) takes the same names as in the
+configuration file, not a number: output.format takes CSV or JSON,
+case-insensitive (empty means CSV). A boolean option takes true, in lower
+case: any other value means false.
+
+For example `-Xoutput.format=JSON`. `./probe -x` lists the accepted names of
+such options, and the type of the others.
+
 ### List all overridable parameters
 
 ```bash
@@ -96,7 +104,7 @@ In DPDK mode, use comma-separated port numbers: `source = "0,1"`. Traffic is agg
 
 ```
 output {
-    format = CSV             # CSV or JSON
+    format = CSV             # CSV or JSON, case-insensitive (not a number)
     cache-max = 100000       # Max messages in cache before flush
     cache-period = 5         # Flush interval in seconds
 }
