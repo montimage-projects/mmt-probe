@@ -179,6 +179,19 @@ test-file-output-unset: compile
 	@echo "[TEST] file output without output-file"
 	$(QUIET) sh $(TOP_DIR)/test/file-output-unset/check_file_output_unset.sh $(TOP_DIR)/$(APP)
 
+# Enum-like option values (issue #39): output.format takes CSV or JSON,
+# case-insensitive, in the configuration file and through -X alike, and
+# every spelling writes the same report; a refused value - a number or an
+# unknown name - must be reported with the accepted names and a non-zero
+# exit, and -x must list those names instead of the storage type. The
+# other enum-like -X options of the build are checked the same way. The
+# compile prerequisite keeps a parallel `make -j test` on a clean tree
+# from racing the build.
+.PHONY: test-output-format
+test-output-format: compile
+	@echo "[TEST] output.format and enum-like -X values"
+	$(QUIET) sh $(TOP_DIR)/test/output-format/check_output_format.sh $(TOP_DIR)/$(APP)
+
 .PHONY: test
-test: test-snaplen test-crash test-report-overflow test-dynconf-reply test-online-signals test-errno-signal test-hash test-file-output-unset
+test: test-snaplen test-crash test-report-overflow test-dynconf-reply test-online-signals test-errno-signal test-hash test-file-output-unset test-output-format
 	@:
