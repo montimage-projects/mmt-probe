@@ -96,7 +96,9 @@ IF_ENABLE_PCAP(
 	printf("\t-X attr=value    : Override configuration attributes.\n");
 	printf("\t                    For example \"-X file-output.enable=true -Xfile-output.output-dir=/tmp/\" will enable output to file and change output directory to /tmp.\n");
 	printf("\t                    This parameter can appear several times.\n");
-	printf("\t-x               : Prints list of configuration attributes being able to be used with -X, then exits.\n");
+	printf("\t                    An option that takes a name (see -x) takes the same names as in the configuration file, not a number: output.format takes %s.\n", CONF_OUTPUT_FORMAT_VALUES );
+	printf("\t                    A boolean option takes true, in lower case: any other value means false.\n");
+	printf("\t-x               : Prints list of configuration attributes being able to be used with -X, with their type or accepted values, then exits.\n");
 	printf("\t-h               : Prints this help, then exits.\n");
 }
 

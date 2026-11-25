@@ -35,7 +35,7 @@ bool conf_parse_input_mode(int *result, const char *value) {
 static int _conf_parse_input_mode(cfg_t *cfg, cfg_opt_t *opt, const char *value, void *result) {
 	if ( conf_parse_input_mode( result, value) )
 		return 0;
-	cfg_error(cfg, "invalid value for option '%s': %s", cfg_opt_name(opt), value);
+	cfg_error(cfg, "invalid value for option '%s': %s. Expect " CONF_INPUT_MODE_VALUES ".", cfg_opt_name(opt), value);
 	return -1;
 }
 
@@ -55,7 +55,7 @@ bool conf_parse_rtt_base(int *result, const char *value) {
 static int _conf_parse_rtt_base(cfg_t *cfg, cfg_opt_t *opt, const char *value, void *result) {
 	if ( conf_parse_rtt_base( result, value) )
 		return 0;
-	cfg_error(cfg, "invalid value for option '%s': %s", cfg_opt_name(opt), value);
+	cfg_error(cfg, "invalid value for option '%s': %s. Expect " CONF_RTT_BASE_VALUES ".", cfg_opt_name(opt), value);
 	return -1;
 }
 
@@ -75,7 +75,7 @@ static inline int _parse_output_format(cfg_t *cfg, cfg_opt_t *opt, const char *v
 	if( conf_parse_output_format( result, value ))
 		return 0;
 
-	cfg_error(cfg, "Invalid '%s' for option '%s'. Use either CSV or JSON.", value, cfg_opt_name(opt));
+	cfg_error(cfg, "Invalid '%s' for option '%s'. Expect " CONF_OUTPUT_FORMAT_VALUES ".", value, cfg_opt_name(opt));
 	return -1;
 }
 
@@ -98,7 +98,7 @@ bool conf_parse_output_socket_type(int *result, const char *value) {
 static int _conf_parse_socket_type(cfg_t *cfg, cfg_opt_t *opt, const char *value, void *result) {
 	if( conf_parse_output_socket_type( result, value ))
 		return 0;
-	cfg_error(cfg, "invalid value for option '%s': %s. Expect UNIX, TCP, UDP, or, BOTH.", cfg_opt_name(opt), value);
+	cfg_error(cfg, "invalid value for option '%s': %s. Expect " CONF_SOCKET_TYPE_VALUES ".", cfg_opt_name(opt), value);
 	return -1;
 }
 
@@ -137,7 +137,7 @@ bool conf_parse_security_ignore_mode(int *result, const char *value) {
 }
 static int _conf_parse_security_ignore_remain_flow(cfg_t *cfg, cfg_opt_t *opt, const char *value, void *result) {
 	if ( ! conf_parse_security_ignore_mode( result, value ) ){
-		cfg_error(cfg, "invalid value for option '%s': %s. Expect either NONE, SECURITY, or, DPI.", cfg_opt_name(opt), value);
+		cfg_error(cfg, "invalid value for option '%s': %s. Expect " CONF_SECURITY_IGNORE_REMAIN_FLOW_VALUES ".", cfg_opt_name(opt), value);
 		return -1;
 	}
 	DEBUG( "security.ignore-remain-flow = %d", *(int *) result );
