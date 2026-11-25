@@ -62,7 +62,8 @@ static size_t _get_handlers( const conditional_handler_t **ret){
 	return (sizeof( handlers ) / sizeof( handlers[0] ));
 }
 ftp_reconstruct_context_t *ftp_reconstruct_init( const reconstruct_data_conf_t *conf, mmt_handler_t *dpi_handler ){
-	if( ! conf->is_enable )
+	//conf is NULL when the configuration has no 'reconstruct-data ftp' block
+	if( conf == NULL || ! conf->is_enable )
 		return NULL;
 
 	const conditional_handler_t *handlers = NULL;

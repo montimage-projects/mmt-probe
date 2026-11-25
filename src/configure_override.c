@@ -102,10 +102,40 @@ const char* conf_validate_data_value( const identity_t *ident, const char *data_
 	return NULL;
 }
 
+//The titled 'reconstruct-data' blocks are CFGF_MULTI: a block left out of the
+// configuration file leaves its pointer NULL, so it has no field to override.
+static inline bool _is_block_missing( const probe_conf_t *conf, const identity_t *ident ){
+	const char *block = NULL;
+	switch( ident->val ){
+#ifdef FTP_RECONSTRUCT_MODULE
+	case CONF_ATT__RECONSTRUCT_DATA__FTP__ENABLE:
+	case CONF_ATT__RECONSTRUCT_DATA__FTP__OUTPUT_DIR:
+		if( conf->reconstructions.ftp == NULL )
+			block = "reconstruct-data ftp";
+		break;
+#endif
+#ifdef HTTP_RECONSTRUCT_MODULE
+	case CONF_ATT__RECONSTRUCT_DATA__HTTP__ENABLE:
+	case CONF_ATT__RECONSTRUCT_DATA__HTTP__OUTPUT_DIR:
+		if( conf->reconstructions.http == NULL )
+			block = "reconstruct-data http";
+		break;
+#endif
+	default:
+		break;
+	}
+	if( block == NULL )
+		return false;
+	log_write( LOG_ERR, "Cannot set [%s]: the configuration has no '%s' block", ident->ident, block );
+	return true;
+}
+
 static inline bool _override_element_by_ident( probe_conf_t *conf, const identity_t *ident, const char *value_str ){
 	uint32_t int_val = 0;
 	int i;
 	DEBUG("Updating %s to %s", ident->ident, value_str );
+	if( _is_block_missing( conf, ident ) )
+		return false;
 	void *field_ptr = conf_get_ident_attribute_field(conf, ident->val );
 	int enum_val = 0;
 
