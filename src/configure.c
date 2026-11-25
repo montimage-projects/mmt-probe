@@ -492,6 +492,10 @@ static inline input_source_conf_t * _parse_input_source( cfg_t *cfg ){
 	if( snap_len < 0 || snap_len > PCAP_FILE_SNAP_LEN_MAX ){
 		log_write( LOG_ERR, "Unexpected value %ld for 'input.snap-len': expect a number from 0 to %d",
 			snap_len, PCAP_FILE_SNAP_LEN_MAX );
+		mmt_probe_free( ret->input_source );
+#ifdef DPDK_MODULE
+		mmt_probe_free( ret->dpdk_options );
+#endif
 		mmt_probe_free( ret );
 		_conf_refused = true;
 		return NULL;
@@ -536,6 +540,7 @@ static inline pcap_dump_conf_t *_parse_dump_to_file( cfg_t *cfg ){
 	if( snap_len < 0 || snap_len > PCAP_FILE_SNAP_LEN_MAX ){
 		log_write( LOG_ERR, "Unexpected value %ld for 'dump-pcap.snap-len': expect a number from 0 to %d",
 			snap_len, PCAP_FILE_SNAP_LEN_MAX );
+		mmt_probe_free( ret->directory );
 		mmt_probe_free( ret );
 		_conf_refused = true;
 		return NULL;
@@ -1385,6 +1390,9 @@ void conf_release( probe_conf_t *conf){
 	if( conf->input ){
 		mmt_probe_free( conf->input->input_source );
 		mmt_probe_free( conf->input->pcap_filter );
+#ifdef DPDK_MODULE
+		mmt_probe_free( conf->input->dpdk_options );
+#endif
 		mmt_probe_free( conf->input );
 	}
 
