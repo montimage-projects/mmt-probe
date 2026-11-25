@@ -247,6 +247,21 @@ test-output-format: compile
 	@echo "[TEST] output.format and enum-like -X values"
 	$(QUIET) sh $(TOP_DIR)/test/output-format/check_output_format.sh $(TOP_DIR)/$(APP)
 
+# End-of-capture alert delivery (issue #38): every alert MMT-Security raises
+# during an offline capture must be written before the probe exits, on every
+# run. Runs ./probe RUNS times (default 3) per leg on a generated capture
+# whose last packets each raise one alert of rule 13 - thread-nb 0, 1 and 3,
+# the engine in the worker thread or in 1 or 2 threads of its own, CSV and
+# JSON, plain and sampled files - and on test/UA-Exp01.pcap with 3 workers,
+# checking that the reports written equal the alerts raised. Skipped on a
+# build without SECURITY_MODULE or without the installed rules. The compile
+# prerequisite keeps a parallel `make -j test` on a clean tree from racing
+# the build.
+.PHONY: test-alert-delivery
+test-alert-delivery: compile
+	@echo "[TEST] end-of-capture alert delivery"
+	$(QUIET) sh $(TOP_DIR)/test/alert-delivery/check_alert_delivery.sh $(TOP_DIR)/$(APP)
+
 .PHONY: test
-test: test-stix test-report-overflow-stix test-snaplen test-crash test-report-overflow test-dynconf-reply test-online-signals test-errno-signal test-hash test-file-output-unset test-output-format
+test: test-stix test-report-overflow-stix test-snaplen test-crash test-report-overflow test-dynconf-reply test-online-signals test-errno-signal test-hash test-file-output-unset test-output-format test-alert-delivery
 	@:
