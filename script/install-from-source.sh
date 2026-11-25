@@ -40,7 +40,7 @@ CPU=$(getconf _NPROCESSORS_ONLN)
 # install libraries 
 apt-get update && apt-get install -y \
 	git cmake gcc g++ cpp\
-	libconfuse-dev libpcap-dev libxml2-dev\
+	libconfuse-dev libpcap-dev libxml2-dev uuid-dev\
 	curl
 
 gcc -v
@@ -109,7 +109,7 @@ ldconfig
 cd "$SCRIPT_DIR/.."
 #git clone https://github.com/montimage/mmt-probe mmt-probe
 #cd mmt-probe
-MODULES="KAFKA_MODULE MONGODB_MODULE PCAP_DUMP_MODULE QOS_MODULE REDIS_MODULE MQTT_MODULE SECURITY_MODULE SOCKET_MODULE LTE_MODULE"
+MODULES="KAFKA_MODULE MONGODB_MODULE PCAP_DUMP_MODULE QOS_MODULE REDIS_MODULE MQTT_MODULE SECURITY_MODULE SOCKET_MODULE LTE_MODULE STIX_FORMAT"
 make -j $CPU $MODULES compile
 #make $MODULES deb
 make $MODULES install
