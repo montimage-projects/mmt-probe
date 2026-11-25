@@ -322,6 +322,20 @@ test-alert-delivery: compile
 	@echo "[TEST] end-of-capture alert delivery"
 	$(QUIET) sh $(TOP_DIR)/test/alert-delivery/check_alert_delivery.sh $(TOP_DIR)/$(APP)
 
+# Uninitialised `now` on the offline timer path (issue #46): the empty-ring
+# branch of _worker_thread fed an uninitialised struct timeval to
+# worker_update_timer until a first packet set it. Runs the probe under
+# valgrind memcheck on a single-flow capture with thread-nb = 3 - the
+# workers the flow never reaches spin on their empty rings and would feed
+# the uninitialised timestamp on every iteration - and on
+# test/UA-Exp01.pcap, asserting no uninitialised-value report. Skipped when
+# valgrind is not installed. The compile prerequisite keeps a parallel
+# `make -j test` on a clean tree from racing the build.
+.PHONY: test-uninit-timer
+test-uninit-timer: compile
+	@echo "[TEST] uninitialised offline timer (valgrind)"
+	$(QUIET) sh $(TOP_DIR)/test/uninit-timer/check_uninit_timer.sh $(TOP_DIR)/$(APP)
+
 .PHONY: test
-test: test-stix test-report-overflow-stix test-snaplen test-crash test-report-overflow test-dynconf-reply test-online-signals test-errno-signal test-double-signal test-hash test-file-output-unset test-output-format test-sysreport-channel test-alert-delivery test-mqtt-output
+test: test-stix test-report-overflow-stix test-snaplen test-crash test-report-overflow test-dynconf-reply test-online-signals test-errno-signal test-double-signal test-hash test-file-output-unset test-output-format test-sysreport-channel test-alert-delivery test-mqtt-output test-uninit-timer
 	@:
