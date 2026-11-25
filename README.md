@@ -54,7 +54,8 @@ Options:
    -t <trace file>  : Trace file for offline analysis
    -i <interface>   : Interface name for live traffic analysis
    -X attr=value    : Override configuration attributes
-   -x               : Print list of overridable configuration attributes, then exit
+                      A value is parsed as in the configuration file, for example output.format takes CSV or JSON, case-insensitive (empty means CSV)
+   -x               : Print list of overridable configuration attributes with their type or accepted values, then exit
    -h               : Print help, then exit
 ```
 
