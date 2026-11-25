@@ -27,6 +27,13 @@
 #undef MQTT_MODULE
 #undef SOCKET_MODULE
 
+//this branch builds output.c with an optional STIX alert format; compile it
+//out so the driver needs neither libuuid nor the STIX sources, except in the
+//STIX-on variant built by test-report-overflow-stix
+#ifndef REPORT_OVERFLOW_TEST_STIX
+#undef STIX_FORMAT
+#endif
+
 //the probe always builds with -DNDEBUG, so assert() would compile to nothing
 //here: CHECK always evaluates its condition, prints file:line and the
 //failing condition on stderr, and exits non-zero

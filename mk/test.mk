@@ -1,4 +1,59 @@
 #####################################################
+# UNIT TESTS                                        #
+#####################################################
+
+# Unit check of the STIX 2.1 alert builder (src/modules/output_format/stix_format.c).
+# Needs only gcc and libuuid (package uuid-dev), not MMT-DPI.
+#   make test-stix
+STIX_TEST_DIR := $(TOP_DIR)/test/stix_format
+STIX_TEST_BIN := $(STIX_TEST_DIR)/test_stix_format
+
+.PHONY: test-stix
+test-stix:
+	@echo "[COMPILE] $(notdir $(STIX_TEST_BIN))"
+	$(QUIET) $(CC) -Wall -Wextra -O1 -o $(STIX_TEST_BIN) \
+		$(STIX_TEST_DIR)/test_stix_format.c $(SRC_DIR)/modules/output_format/stix_format.c -luuid
+	@echo "[TEST] $(notdir $(STIX_TEST_BIN))"
+	$(QUIET) $(STIX_TEST_BIN)
+
+# STIX-on variant of the report-overflow driver (issue #9): the same test
+# built with -DSTIX_FORMAT and linked with the real stix_format.c, so the
+# STIX path of output_write_report runs end to end — fitting bundles through
+# the JSON wrap, oversized ones and non-alert bodies through the bounded CSV
+# fallback. Skipped cleanly when the libuuid headers are missing, as
+# test-stix needs them too.
+STIX_OVERFLOW_TEST_DIR    := $(TOP_DIR)/test/report-overflow
+STIX_OVERFLOW_TEST_OBJDIR := $(STIX_OVERFLOW_TEST_DIR)/obj-asan-stix
+STIX_OVERFLOW_TEST_BIN    := $(STIX_OVERFLOW_TEST_DIR)/report-overflow-stix-test
+STIX_OVERFLOW_TEST_OBJS   := $(STIX_OVERFLOW_TEST_OBJDIR)/report_overflow_test.o \
+	$(STIX_OVERFLOW_TEST_OBJDIR)/stix_format.o
+HAVE_UUID_HEADERS         := $(shell printf '#include <uuid/uuid.h>\n' | \
+	$(CC) -fsyntax-only -x c - > /dev/null 2>&1 && echo 1)
+
+$(STIX_OVERFLOW_TEST_OBJDIR)/report_overflow_test.o: $(STIX_OVERFLOW_TEST_DIR)/report_overflow_test.c
+	@mkdir -p $(STIX_OVERFLOW_TEST_OBJDIR)
+	$(QUIET) $(CC) $(CFLAGS) -fsanitize=address -DSTIX_FORMAT -DREPORT_OVERFLOW_TEST_STIX -c -o $@ $<
+
+$(STIX_OVERFLOW_TEST_OBJDIR)/stix_format.o: $(SRC_DIR)/modules/output_format/stix_format.c
+	@mkdir -p $(STIX_OVERFLOW_TEST_OBJDIR)
+	$(QUIET) $(CC) $(CFLAGS) -fsanitize=address -c -o $@ $<
+
+$(STIX_OVERFLOW_TEST_BIN): $(STIX_OVERFLOW_TEST_OBJS)
+	$(QUIET) $(CC) $(CLDFLAGS) -fsanitize=address -o $@ $^ $(LIBS) -luuid
+
+.PHONY: test-report-overflow-stix
+ifdef HAVE_UUID_HEADERS
+test-report-overflow-stix: --check-dpi-folder $(STIX_OVERFLOW_TEST_BIN)
+	@echo "[TEST] report-overflow STIX-on under ASan"
+	$(QUIET) status=0; $(STIX_OVERFLOW_TEST_BIN) || status=$$?; \
+		$(RM) $(STIX_OVERFLOW_TEST_OBJDIR) $(STIX_OVERFLOW_TEST_BIN); exit $$status
+else
+test-report-overflow-stix:
+	@echo "[TEST] report-overflow STIX-on under ASan"
+	@echo "SKIP report-overflow-stix (uuid/uuid.h not found)"
+endif
+
+#####################################################
 # INTEGRATION CHECKS                                #
 #####################################################
 
@@ -207,6 +262,21 @@ test-sysreport-channel: compile
 	@echo "[TEST] system-report.output-channel -X values"
 	$(QUIET) sh $(TOP_DIR)/test/sysreport-channel/check_sysreport_channel.sh $(TOP_DIR)/$(APP)
 
+# End-of-capture alert delivery (issue #38): every alert MMT-Security raises
+# during an offline capture must be written before the probe exits, on every
+# run. Runs ./probe RUNS times (default 3) per leg on a generated capture
+# whose last packets each raise one alert of rule 13 - thread-nb 0, 1 and 3,
+# the engine in the worker thread or in 1 or 2 threads of its own, CSV and
+# JSON, plain and sampled files - and on test/UA-Exp01.pcap with 3 workers,
+# checking that the reports written equal the alerts raised. Skipped on a
+# build without SECURITY_MODULE or without the installed rules. The compile
+# prerequisite keeps a parallel `make -j test` on a clean tree from racing
+# the build.
+.PHONY: test-alert-delivery
+test-alert-delivery: compile
+	@echo "[TEST] end-of-capture alert delivery"
+	$(QUIET) sh $(TOP_DIR)/test/alert-delivery/check_alert_delivery.sh $(TOP_DIR)/$(APP)
+
 .PHONY: test
-test: test-snaplen test-crash test-report-overflow test-dynconf-reply test-online-signals test-errno-signal test-hash test-file-output-unset test-output-format test-sysreport-channel
+test: test-stix test-report-overflow-stix test-snaplen test-crash test-report-overflow test-dynconf-reply test-online-signals test-errno-signal test-hash test-file-output-unset test-output-format test-sysreport-channel test-alert-delivery
 	@:

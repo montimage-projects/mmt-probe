@@ -21,6 +21,10 @@
 #include "redis/redis.h"
 #include "mqtt/mqtt_output.h"
 
+#ifdef STIX_FORMAT
+#include "../output_format/stix_format.h"
+#endif
+
 struct output_struct{
 	uint16_t index;
 	uint32_t probe_id;
@@ -104,7 +108,7 @@ output_t *output_alloc_init( uint16_t output_id, const struct output_conf_struct
  */
 static inline int _write( output_t *output, output_channel_conf_t channels, const char *message, bool raw ){
 	int ret = 0;
-	//room for a whole message plus the JSON wrap: '[' , ']' and '\0'
+	//room for '[' + message (up to MAX_LENGTH_REPORT_MESSAGE) + ']' + '\0'
 	char new_msg[ MAX_LENGTH_REPORT_MESSAGE + 3 ];
 
 	//we surround message inside [] to convert it to JSON
@@ -216,20 +220,31 @@ int output_write_report( output_t *output, output_channel_conf_t channels,
 
 	char message[ MAX_LENGTH_REPORT_MESSAGE + 1 ];
 	int offset = 0;
-	STRING_BUILDER_WITH_SEPARATOR( offset, message, MAX_LENGTH_REPORT_MESSAGE, ",",
-			__INT( report_type ),
-			__INT( output->probe_id ),
-			__STR( output->input_src ),
-			__TIME( ts )
-	);
+	int stix_built = 0;
 
-	if( message_body != NULL ){
-		message[ offset ++ ] = ',';
-		size_t len = strlen( message_body );
-		if( len > MAX_LENGTH_REPORT_MESSAGE - offset )
-			len = MAX_LENGTH_REPORT_MESSAGE - offset;
-		memcpy( message+offset, message_body, len );
-		message[ offset + len ] = '\0';
+#ifdef STIX_FORMAT
+	if( report_type == SECURITY_REPORT_TYPE )
+		stix_built = construct_alert_stix_format( message_body, ts,
+				output->probe_id, output->input_src,
+				message, MAX_LENGTH_REPORT_MESSAGE );
+#endif
+
+	if( !stix_built ){
+		STRING_BUILDER_WITH_SEPARATOR( offset, message, MAX_LENGTH_REPORT_MESSAGE, ",",
+				__INT( report_type ),
+				__INT( output->probe_id ),
+				__STR( output->input_src ),
+				__TIME( ts )
+		);
+
+		if( message_body != NULL ){
+			message[ offset ++ ] = ',';
+			size_t len = strlen( message_body );
+			if( len > MAX_LENGTH_REPORT_MESSAGE - offset )
+				len = MAX_LENGTH_REPORT_MESSAGE - offset;
+			memcpy( message+offset, message_body, len );
+			message[ offset + len ] = '\0';
+		}
 	}
 
 	int ret = _write( output, channels, message, false );

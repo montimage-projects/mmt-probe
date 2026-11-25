@@ -59,6 +59,8 @@ typedef struct kafka_output_conf_struct{
 	internet_service_address_t host;
 	//further setting for kafka connection, such as, TLS certificate, cipher type, ...
 	char *topic_name;
+	char *username;
+	char *password;
 }kafka_output_conf_t;
 
 typedef struct mqtt_output_conf_struct{
@@ -157,6 +159,7 @@ typedef struct security_conf_struct{
 	uint16_t threads_size;
 	char *excluded_rules;
 	char *rules_mask;
+	char *stix_priority; //per-rule priority override of STIX bundles, e.g., "(critical:4,5)(high:56)"
 	output_channel_conf_t output_channels;
 	struct{
 		uint32_t input_max_message_size;
