@@ -167,7 +167,7 @@ DECLARE_CONF_ATT(
 	//output
 	(CONF_ATT__OUTPUT__FORMAT,       "output.format",       &conf->outputs.format,       UINT16_T),
 	(CONF_ATT__OUTPUT__CACHE_MAX,    "output.cache-max",    &conf->outputs.cache_max,    UINT32_T),
-	(CONF_ATT__OUTPUT__CACHE_PERIOD, "output.cache-period", &conf->outputs.cache_period, UINT32_T),
+	(CONF_ATT__OUTPUT__CACHE_PERIOD, "output.cache-period", &conf->outputs.cache_period, UINT16_T),
 
 	//file-output
 	(CONF_ATT__FILE_OUTPUT__ENABLE,       "file-output.enable",       &conf->outputs.file->is_enable,            BOOL),
@@ -234,7 +234,7 @@ DECLARE_CONF_ATT(
 	//system-report
 	(CONF_ATT__SYSTEM_REPORT__ENABLE,         "system-report.enable", &conf->reports.cpu_mem->is_enable, BOOL),
 	(CONF_ATT__SYSTEM_REPORT__PERIOD,         "system-report.period", &conf->reports.cpu_mem->frequency, UINT16_T),
-	(CONF_ATT__SYSTEM_REPORT__OUTPUT_CHANNEL, "system-report.output-channel", &conf->reports.cpu_mem->output_channels, CHAR_STAR),
+	(CONF_ATT__SYSTEM_REPORT__OUTPUT_CHANNEL, "system-report.output-channel", &conf->reports.cpu_mem->output_channels, LIST),
 
 	//behaviour
 	(CONF_ATT__BEHAVIOUR__ENABLE,       "behaviour.enable",       &conf->reports.behaviour->is_enable, BOOL),
