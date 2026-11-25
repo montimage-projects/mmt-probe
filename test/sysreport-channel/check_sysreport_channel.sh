@@ -170,10 +170,11 @@ expect_channel() {
 	pass "$name"
 }
 
-#a run that must be refused: a clean exit status 1, never a crash - the
-# configuration file's 'output-channel' holds a malformed list, refused by
-# the parser before any packet is read (issue #40: it used to die by
-# abort(), status 134)
+#a run that must be refused: the do-not-restart status 3, never a crash -
+# the configuration file's 'output-channel' holds a malformed list,
+# refused by the parser before any packet is read (issue #40: it used to
+# die by abort(), status 134; issue #45: refusals now exit
+# EXIT_STATUS_NO_RESTART)
 expect_reject() {
 	name=$1
 	conf=$(make_conf "$name" "$2")
@@ -182,8 +183,8 @@ expect_reject() {
 	$TIMEOUT "$PROBE" -c "$conf" -t "$PCAP" \
 		> "$WORK_DIR/$name/log" 2>&1 || status=$?
 
-	if [ "$status" -ne 1 ]; then
-		bad "$name" "exit status $status, expected 1"
+	if [ "$status" -ne 3 ]; then
+		bad "$name" "exit status $status, expected 3"
 		return
 	fi
 	if grep -q 'Segmentation fault\|Sanitizer\|runtime error' "$WORK_DIR/$name/log"; then

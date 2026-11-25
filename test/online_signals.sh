@@ -1,11 +1,17 @@
 #!/bin/sh
-# online_signals.sh — regression tests for issues #7 and #10.
+# online_signals.sh — regression tests for issues #7, #10 and #45.
 #
 # In online mode the probe runs a monitor (supervisor) process that forks a
 # processing child. Issue #7: the monitor ignored SIGINT/SIGTERM, so a signal
 # sent to it only (docker stop, systemctl stop) degraded to SIGKILL after the
 # grace period and reports were not flushed. Issue #10: the processing child
 # always exited 0, so a start-up failure looked like a clean stop.
+# Issue #45: a second identical SIGINT/SIGTERM while the child was shutting
+# down made it _exit(0) before the drain - the security drain
+# (mmt_sec_unregister), the output fclose/.sem and the stdio flush were
+# skipped - and a refused start-up configuration exited 1 although the
+# shipped mmt-probe.service treats only exit status 3
+# (EXIT_STATUS_NO_RESTART in src/lib/limit.h) as a definitive stop.
 #
 # This checks:
 #  - the monitor forwards SIGTERM and SIGINT to the processing child, waits
@@ -18,14 +24,23 @@
 #  - on a build with DYNAMIC_CONFIG_MODULE, a group-wide SIGINT - the
 #    systemd KillMode=control-group shape - plus a forwarded SIGTERM stops
 #    the monitor and both children with no hang, no orphan and exit 0;
+#  - a repeated termination signal while the child drains is a no-op: the
+#    drain still finishes (final statistics, flushed and closed report
+#    files, .sem marker), a different second signal still exits right away;
+#    checked offline without CAP_NET_RAW and, when NET_RAW_IMAGE names an
+#    image built from test/double-signal/Dockerfile, online on the
+#    container's loopback;
+#  - every refused configuration exits EXIT_STATUS_NO_RESTART (3), never 1,
+#    while a real crash still dies by its signal (134/139 from a shell);
 #  - "docker stop" on a probe container exits 0 quickly - only when
 #    DOCKER_IMAGE names an image holding this probe and a docker daemon is
 #    reachable.
 #
 # The live-capture checks need an effective CAP_NET_RAW on the interface;
 # without one they are skipped cleanly, like check_snaplen.sh - the
-# capability-independent checks (the start-up error and, when configured,
-# the docker stop) still run.
+# capability-independent checks (the start-up error, the offline
+# double-signal and refusal legs and, when configured, the docker checks)
+# still run.
 #
 # Run from the repository root after `make ... compile`, e.g.:
 #   make test-online-signals
@@ -35,11 +50,19 @@
 # Environment overrides:
 #   PROBE        probe binary            (default: <repo>/probe)
 #   CONF         probe configuration     (default: <repo>/mmt-probe.conf)
+#   PCAP         check pcap for the offline legs
+#                (default: <repo>/test/UA-Exp01.pcap)
 #   ROOT         repository root mounted by the docker-stop check's
 #                sibling container       (default: <repo>)
 #   IFACE        capture interface       (default: lo)
 #   REPEAT_TERM  repeats of the monitor-SIGTERM check (default: 1)
 #   GROUP_KILL   repeats of the group-kill check      (default: 10)
+#   DBSIG_FRAMES frames in the generated sessions pcap - roughly one
+#                distinct session each, which is what gives the offline
+#                drain its length       (default: 300000)
+#   NET_RAW_IMAGE image for the online double-signal leg, built from
+#                test/double-signal/Dockerfile with the probe to check
+#                (default: skip)
 #   DOCKER_IMAGE image for the docker-stop check (default: skip)
 #   CC           compiler for wait_fate  (default: cc)
 
@@ -50,10 +73,13 @@ ROOT=${ROOT:-$(CDPATH= cd -- "$SELF_DIR/.." && pwd)}
 
 PROBE=${PROBE:-"$ROOT/probe"}
 CONF=${CONF:-"$ROOT/mmt-probe.conf"}
+PCAP=${PCAP:-"$ROOT/test/UA-Exp01.pcap"}
 IFACE=${IFACE:-lo}
 REPEAT_TERM=${REPEAT_TERM:-1}
 GROUP_KILL=${GROUP_KILL:-10}
+DBSIG_FRAMES=${DBSIG_FRAMES:-300000}
 DOCKER_IMAGE=${DOCKER_IMAGE:-}
+NET_RAW_IMAGE=${NET_RAW_IMAGE:-}
 CC=${CC:-cc}
 
 # EXIT_STATUS_NO_RESTART (src/lib/limit.h) and its raw waitpid encoding,
@@ -208,19 +234,23 @@ wait_wrapper() {
 	wait_pid "$name" "$WRAPPER_PID" "$@"
 }
 
-# check_reports <name>: the reports written before the signal must be
-# flushed. A *.sem file is the probe's zero-byte "file complete" marker and
-# sample files are created eagerly, so only non-empty files are checked for
-# a terminating newline; at least one file must hold flushed data.
+# check_reports <name> [dir]: the reports written before the signal must
+# be flushed. A *.sem file is the probe's zero-byte "file complete" marker
+# and sample files are created eagerly, so only non-empty files are
+# checked for a terminating newline; at least one file must hold flushed
+# data. dir defaults to $WORK/reports.
+# _cr_* names: sh has no function scope, a plain 'dir' would clobber a
+# caller's variable of the same name
 check_reports() {
-	nb=$(find "$WORK/reports" -type f ! -name '*.sem' 2>/dev/null | wc -l)
+	_cr_dir=${2:-$WORK/reports}
+	nb=$(find "$_cr_dir" -type f ! -name '*.sem' 2>/dev/null | wc -l)
 	if [ "$nb" -eq 0 ]; then
 		bad "$1: no report file was written"
 		return
 	fi
 	nb_data=0
 	nb_bad=0
-	for f in "$WORK"/reports/*; do
+	for f in "$_cr_dir"/*; do
 		case "$f" in *.sem) continue;; esac
 		[ -s "$f" ] || continue
 		nb_data=$((nb_data + 1))
@@ -577,7 +607,382 @@ else
 	fi
 fi
 
-# 6. docker stop on a containerized probe: exits 0, well under the 10 s
+# 6. issue #45 - a repeated termination signal while the child drains.
+# A group-wide Ctrl+C reaches the processing child directly AND again
+# through the monitor's forward (systemd's KillMode=control-group does the
+# same with SIGTERM): the repeat used to take the is_exiting branch and
+# _exit(0) mid-drain, skipping the security drain, the output fclose/.sem
+# and the stdio flush. The child now treats a repeat of the signal it is
+# handling as a no-op, so the drain finishes; a different second signal
+# still exits right away (that path is unit-tested by test-double-signal).
+#
+# The offline legs need no CAP_NET_RAW: the same handler branch runs when
+# a pcap replay is interrupted. Each run signals mid-capture and repeats
+# while is_exiting is set; the assertions are that the drain ran to the
+# end - the final statistics are logged, no "while processing other one"
+# immediate-exit line is printed for a repeat, every in-flight sampled
+# file has its .sem marker and every non-empty report ends with a
+# newline. On the unfixed code a repeat exits before or inside the drain,
+# so the markers, the .sem and the drained reports are missing.
+#
+# The drain's length is what makes a repeat land inside it, and it scales
+# with the live sessions left to flush - so the legs replay a generated
+# pcap of mostly-distinct sessions rather than a repeated capture of a
+# few flows.
+
+# a pcap of DBSIG_FRAMES frames, each a mostly-distinct UDP session -
+# generated like test/alert-delivery/gen_pcap.py
+LONG="$WORK/dbsig-sessions.pcap"
+if command -v python3 >/dev/null 2>&1; then
+	python3 - "$LONG" "$DBSIG_FRAMES" <<'PYEOF'
+import struct, sys
+sys.path.insert(0, "test/alert-delivery")
+import gen_pcap as g
+
+def sess_frame(i):
+    #one mostly-distinct UDP session per frame
+    src = 0xC6120000 | ((i // 55000) % 64)
+    dst = 0xC6130000 | (i % 64)
+    payload = struct.pack(">Q", i) + bytes(24)
+    udp = struct.pack(">HHHH", 40000 + (i % 20000),
+                     10000 + (i % 55000), 8 + len(payload), 0) + payload
+    ck = g._l4_checksum(17, src, dst, udp) or 0xFFFF
+    udp = udp[:6] + struct.pack(">H", ck) + udp[8:]
+    return g.ETH + g._ipv4(17, src, dst, udp)
+
+out, n = sys.argv[1], int(sys.argv[2])
+with open(out, "wb") as f:
+    f.write(struct.pack("<IHHiIII", 0xA1B2C3D4, 2, 4, 0, 0, 65535, 1))
+    for i in range(n):
+        frame = sess_frame(i)
+        f.write(struct.pack("<IIII", g.T0 + i // 1000, i % 1000,
+                            len(frame), len(frame)))
+        f.write(frame)
+PYEOF
+	say "double-signal sessions pcap: $(wc -c < "$LONG") bytes"
+else
+	say "SKIP: dbsig offline legs (python3 not found)"
+fi
+
+# start_offline <name>: start the offline probe through wait_fate on the
+# long pcap with a sampled file output; no periodic flush or rotation
+# (huge periods), one worker, so every report sits in stdio buffers or in
+# the drain until the very end - which is what a skipped drain loses
+start_offline() {
+	name=$1
+	mkdir -p "$WORK/$name/reports"
+	: > "$WORK/$name/pid"
+	: > "$WORK/$name/fate"
+	"$WORK/wait_fate" "$WORK/$name/pid" "$WORK/$name/fate" \
+		"$PROBE" -c "$CONF" -t "$LONG" \
+		-X "file-output.enable=true" \
+		-X "file-output.sample-file=true" \
+		-X "file-output.output-dir=$WORK/$name/reports/" \
+		-X "stats-period=3600" -X "output.cache-period=3600" \
+		-X "thread-nb=0" -X "session-report.enable=true" \
+		>"$WORK/$name/log" 2>&1 &
+	WRAPPER_PID=$!
+}
+
+# wait for "is running on pid" then for the probe's pid file
+offline_pid() { # <name>
+	wait_grep "is running on pid" "$WORK/$1/log" 200 || return 1
+	i=0
+	while [ "$i" -lt 50 ] && [ ! -s "$WORK/$1/pid" ]; do
+		i=$((i + 1)); sleep 0.1
+	done
+	[ -s "$WORK/$1/pid" ] || return 1
+	cat "$WORK/$1/pid"
+}
+
+# the leg: a first signal mid-capture, then repeats spread over the rest
+# of the run - is_exiting stays set from the first handler until the
+# process exits, so every repeat takes the second-signal branch, whether
+# it lands while the first handler is still running (pending, delivered
+# at its return) or inside the drain. On the unfixed code the first one
+# to land exits immediately; on the fixed probe they are all no-ops.
+repeat_signal() { # <pid> <sig> <count>
+	_i=0
+	while [ "$_i" -lt "$3" ]; do
+		kill -"$2" "$1" 2>/dev/null || return
+		sleep 0.005
+		_i=$((_i + 1))
+	done
+}
+
+# drain_assertions <name> <log> <report-dir>: the checks that fail on the
+# unfixed code because the second signal exits before or inside the drain
+# (_dr_* names for the same reason as check_reports)
+drain_assertions() {
+	_dr_name=$1 _dr_log=$2 _dr_dir=$3
+	#the final statistics only print while the drain runs
+	grep -q "processed" "$_dr_log" \
+		&& pass "$_dr_name: final statistics logged" \
+		|| bad "$_dr_name: drain skipped - no final statistics"
+	#a repeat of the signal being handled must not even report the
+	# immediate exit - on the unfixed code this line is present
+	grep -q "while processing other one" "$_dr_log" \
+		&& bad "$_dr_name: second signal forced the immediate exit" \
+		|| pass "$_dr_name: no immediate-exit on a repeated signal"
+	#the file open at shutdown is closed and marked complete by the drain
+	find "$_dr_dir" -name '*.sem' -type f | grep -q . \
+		&& pass "$_dr_name: .sem marker written" \
+		|| bad "$_dr_name: no .sem marker - output files not closed"
+	check_reports "$_dr_name" "$_dr_dir"
+}
+
+if [ -s "$LONG" ]; then
+
+# reference run: a single SIGINT mid-capture drains normally
+start_offline "dbsig-ref"
+ppid=$(offline_pid "dbsig-ref") || ppid=
+if [ -z "$ppid" ]; then
+	bad "dbsig-ref: probe did not start"
+else
+	sleep 0.2
+	kill -INT "$ppid" 2>/dev/null || true
+	wait_pid "dbsig-ref" "$WRAPPER_PID"
+	check "dbsig-ref status" 0 "$RC"
+	check "dbsig-ref fate" "exit 0" "$(cat "$WORK/dbsig-ref/fate" 2>/dev/null)"
+fi
+
+start_offline "dbsig-int"
+ppid=$(offline_pid "dbsig-int") || ppid=
+if [ -z "$ppid" ]; then
+	bad "dbsig-int: probe did not start"
+else
+	kill -INT "$ppid" 2>/dev/null || true
+	repeat_signal "$ppid" INT 200
+	wait_pid "dbsig-int" "$WRAPPER_PID" "$ppid"
+	if [ "$RC" = -1 ]; then
+		: #the watchdog already failed the leg
+	else
+		check "dbsig-int status" 0 "$RC"
+		check "dbsig-int fate" "exit 0" "$(cat "$WORK/dbsig-int/fate" 2>/dev/null)"
+		drain_assertions "dbsig-int" "$WORK/dbsig-int/log" "$WORK/dbsig-int/reports"
+	fi
+fi
+
+# same leg with SIGTERM
+start_offline "dbsig-term"
+ppid=$(offline_pid "dbsig-term") || ppid=
+if [ -z "$ppid" ]; then
+	bad "dbsig-term: probe did not start"
+else
+	kill -TERM "$ppid" 2>/dev/null || true
+	repeat_signal "$ppid" TERM 200
+	wait_pid "dbsig-term" "$WRAPPER_PID" "$ppid"
+	if [ "$RC" != -1 ]; then
+		check "dbsig-term status" 0 "$RC"
+		check "dbsig-term fate" "exit 0" "$(cat "$WORK/dbsig-term/fate" 2>/dev/null)"
+		drain_assertions "dbsig-term" "$WORK/dbsig-term/log" "$WORK/dbsig-term/reports"
+	fi
+fi
+
+fi #dbsig offline legs need the generated sessions pcap
+
+# the security leg: alerts are raised early in the capture and written
+# during the drain - a skipped drain loses them, so the written count is
+# lower than the alerts the engine says it raised (and than the pcap's
+# deterministic rule-13 count). Only on a SECURITY_MODULE build with the
+# rule set installed.
+if "$PROBE" -v 2>&1 | grep -q "SECURITY" && command -v python3 >/dev/null 2>&1; then
+	DBSIG_PCAP="$WORK/dbsig-sec.pcap"
+	python3 - "$DBSIG_PCAP" <<'PYEOF'
+import struct, sys
+sys.path.insert(0, "test/alert-delivery")
+import gen_pcap as g
+out = sys.argv[1]
+ALERTS, BENIGN = 200, 120000
+frames = [g._syn_with_data_frame(i) for i in range(1, ALERTS + 1)]
+frames += [g._udp_frame(i) for i in range(BENIGN)]
+with open(out, "wb") as f:
+    f.write(struct.pack("<IHHiIII", 0xA1B2C3D4, 2, 4, 0, 0, 65535, 1))
+    for n, frame in enumerate(frames):
+        ts_us = n * 1000
+        f.write(struct.pack("<IIII",
+            g.T0 + ts_us // 1000000, ts_us % 1000000, len(frame), len(frame)))
+        f.write(frame)
+PYEOF
+	if [ -s "$DBSIG_PCAP" ]; then
+		dir="$WORK/dbsig-sec"
+		mkdir -p "$dir/reports"
+		#conf styled on test/alert-delivery's: the security reports go to
+		# the sampled file output; huge periods mean only the drain flushes
+		cat > "$dir/probe.conf" <<EOF
+probe-id = 3
+stack-type = 1
+stack-offset = 0
+stats-period = 3600
+input {
+	mode = OFFLINE
+	source = "$DBSIG_PCAP"
+	snap-len = 0
+}
+output {
+	format = CSV
+	cache-max = 100000
+	cache-period = 3600
+}
+file-output {
+	enable = true
+	output-file = "data.csv"
+	output-dir = "$dir/reports/"
+	sample-file = true
+	retain-files = 0
+}
+thread-nb = 0
+thread-queue = 1024
+security {
+	enable = true
+	thread-nb = 0
+	exclude-rules = ""
+	rules-mask = ""
+	output-channel = {file}
+	report-rule-description = true
+	ignore-remain-flow = true
+	input.max-message-size = 60000
+	security.max-instances = 100000
+	security.smp.ring-size = 1000
+}
+session-report {
+	enable = true
+	output-channel = {file}
+}
+EOF
+		: > "$dir/pid"; : > "$dir/fate"
+		"$WORK/wait_fate" "$dir/pid" "$dir/fate" \
+			"$PROBE" -c "$dir/probe.conf" >"$dir/log" 2>&1 &
+		WRAPPER_PID=$!
+		ppid=$(offline_pid "dbsig-sec") || ppid=
+		if [ -z "$ppid" ]; then
+			bad "dbsig-sec: probe did not start"
+		else
+			#the 200 alerts are raised in the first frames and still
+			# buffered or in the engine when the repeats land: a skipped
+			# drain loses them
+			kill -INT "$ppid" 2>/dev/null || true
+			repeat_signal "$ppid" INT 200
+			wait_pid "dbsig-sec" "$WRAPPER_PID" "$ppid"
+			if [ "$RC" != -1 ]; then
+				check "dbsig-sec status" 0 "$RC"
+				check "dbsig-sec fate" "exit 0" \
+					"$(cat "$dir/fate" 2>/dev/null)"
+				drain_assertions "dbsig-sec" "$dir/log" "$dir/reports"
+				raised=$(grep -E 'processed .* generated [0-9]+ alerts' \
+					"$dir/log" | \
+					sed 's/.* generated \([0-9]*\) alerts.*/\1/' | \
+					awk '{ s += $1 } END { print s + 0 }')
+				#written alerts, in whichever shape the build emits:
+				# STIX bundles on a STIX_FORMAT build, report-type-10
+				# rows otherwise - same counting as check_alert_delivery
+				written=$(cat "$dir"/reports/* 2>/dev/null | \
+					grep -cE '"type": "bundle"|^\[?10,')
+				check "dbsig-sec alerts raised == written" \
+					"$raised" "$written"
+				[ "$raised" -gt 0 ] \
+					|| bad "dbsig-sec: the engine raised no alert"
+			fi
+		fi
+	else
+		bad "dbsig-sec: cannot generate the capture"
+	fi
+else
+	if ! "$PROBE" -v 2>&1 | grep -q "SECURITY"; then
+		say "SKIP: dbsig-sec (probe built without SECURITY_MODULE)"
+	else
+		say "SKIP: dbsig-sec (python3 not found)"
+	fi
+fi
+
+# the online leg inside a container: the probe binary baked into
+# NET_RAW_IMAGE carries cap_net_raw, so the unprivileged container user can
+# capture on the container's loopback. The inner script replays the
+# monitor-forward scenario: a group SIGINT hits the child directly and
+# through the monitor's forward while the drain has live work. The conf is
+# a self-contained online capture on IFACE; on a SECURITY_MODULE build it
+# also enables the security engine so the drain's alert delivery is
+# checked too.
+if [ -n "$NET_RAW_IMAGE" ] && command -v docker >/dev/null 2>&1 && docker info >/dev/null 2>&1; then
+	indir="$WORK/container-in"
+	mkdir -p "$indir"
+	#a self-contained conf for the inner run: online capture on the
+	# container's loopback, sampled file output under /work
+	cat > "$indir/probe-inner.conf" <<EOF
+probe-id = 3
+stack-type = 1
+stack-offset = 0
+stats-period = 3600
+input {
+	mode = ONLINE
+	source = "$IFACE"
+	snap-len = 0
+}
+output {
+	format = CSV
+	cache-max = 100000
+	cache-period = 3600
+}
+file-output {
+	enable = true
+	output-file = "data.csv"
+	output-dir = "/work/reports/"
+	sample-file = true
+	retain-files = 0
+}
+thread-nb = 0
+thread-queue = 1024
+session-report {
+	enable = true
+	output-channel = {file}
+}
+EOF
+	if "$PROBE" -v 2>&1 | grep -q "SECURITY"; then
+		cat >> "$indir/probe-inner.conf" <<'EOF'
+security {
+	enable = true
+	thread-nb = 0
+	exclude-rules = ""
+	rules-mask = ""
+	output-channel = {file}
+	report-rule-description = true
+	ignore-remain-flow = true
+	input.max-message-size = 60000
+	security.max-instances = 100000
+	security.smp.ring-size = 1000
+}
+EOF
+	fi
+	#the inner run reports into /work (= $indir) for the host to check
+	if timeout -s KILL 120 docker run --rm --name "i45-dbsig-$$" \
+		--memory 4g --memory-swap 4g --pids-limit 512 \
+		--user "$(id -u):$(id -g)" \
+		-v "$indir:/work" \
+		-e "CONF=/work/probe-inner.conf" \
+		--entrypoint /bin/sh \
+		"$NET_RAW_IMAGE" /opt/inner_container.sh; then
+		:
+	else
+		bad "dbsig-online: container run failed"
+	fi
+	if [ -s "$indir/verdict" ]; then
+		while IFS= read -r line; do
+			case "$line" in
+			PASS*) pass "dbsig-online: ${line#PASS: }" ;;
+			FAIL*) bad "dbsig-online: ${line#FAIL: }" ;;
+			*) say "dbsig-online: $line" ;;
+			esac
+		done < "$indir/verdict"
+		check_reports "dbsig-online" "$indir/reports"
+	else
+		bad "dbsig-online: no verdict from the container"
+		sed 's/^/    log: /' "$indir/log" 2>/dev/null | tail -20
+	fi
+else
+	say "SKIP: dbsig-online (set NET_RAW_IMAGE to the image built from test/double-signal/Dockerfile)"
+fi
+
+# 7. docker stop on a containerized probe: exits 0, well under the 10 s
 # grace period - only when an image and a daemon are provided. The
 # container runs with --rm; a docker wait subscribed before the stop still
 # reports the exit code once the container is gone.
@@ -614,6 +1019,46 @@ if [ -n "$DOCKER_IMAGE" ] && command -v docker >/dev/null 2>&1 && docker info >/
 else
 	say "SKIP: docker-stop check (set DOCKER_IMAGE with docker reachable to run it)"
 fi
+
+# 8. issue #45 - every refused configuration exits EXIT_STATUS_NO_RESTART
+# (3), the status mmt-probe.service lists under RestartPreventExitStatus=,
+# never EXIT_FAILURE (1) which the service would restart forever. The
+# checks run the probe directly: a refusal exits inside _parse_options
+# before the monitor forks, so no capture capability is needed. Real
+# crashes still die by their signal (crash_exit_status.sh checks the
+# 139/134/... fates offline).
+expect_dnr() { # <name> <probe-args...>
+	name=$1; shift
+	timeout -s KILL 30 "$PROBE" "$@" >"$WORK/$name.log" 2>&1
+	rc=$?
+	check "$name status" "$DNR_STATUS" "$rc"
+	if grep -qiE 'crash signal received|AddressSanitizer|runtime error:' "$WORK/$name.log"; then
+		bad "$name: crash report in the log of a refused configuration"
+	fi
+}
+
+#an unreadable configuration file is refused
+expect_dnr "refuse-missing-conf" -c "$WORK/no-such.conf" -t "$PCAP"
+
+#a malformed configuration file is not a refusal: libconfuse tolerates an
+# unclosed block, so a truncated conf reaches capture setup and dies by
+# abort() like any real crash - crash_exit_status.sh pins that fate. The
+# refusal legs below are the ones _parse_options can reject cleanly.
+
+#a configuration that fails conf_validate is refused - file-output
+# enabled without an output file
+expect_dnr "refuse-invalid-conf" -c "$CONF" -t "$PCAP" \
+	-X "file-output.enable=true" -X "file-output.output-file="
+
+#an -X option value outside the accepted range or format is refused
+expect_dnr "refuse-bad-x" -c "$CONF" -t "$PCAP" -X "output.format=BOGUS"
+
+#an -X option naming a parameter that does not exist is refused
+expect_dnr "refuse-unknown-x" -c "$CONF" -t "$PCAP" -X "no.such.ident=1"
+
+#an -X option into a block absent from the conf file is refused
+expect_dnr "refuse-no-block-x" -c "$CONF" -t "$PCAP" \
+	-X "reconstruct-data.http.output-dir=/tmp/i45-recon"
 
 say "---"
 if [ "$fail" -eq 0 ]; then

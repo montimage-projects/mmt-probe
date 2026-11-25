@@ -187,8 +187,9 @@ run_one() {
 expect_reject() {
 	# $1: case name; the remaining arguments are passed to the probe.
 	# A bad input.snap-len must give a clear error naming the option and
-	# its bound, a clean exit status 1 - a refused configuration no longer
-	# dies by abort(), status 134 - and no capture run.
+	# its bound, the do-not-restart status 3 - a refused configuration no
+	# longer dies by abort(), status 134, nor exits 1 (issues #40, #45) -
+	# and no capture run.
 	name="reject-$1"
 	shift
 	log="$WORK_DIR/$name.log"
@@ -198,7 +199,7 @@ expect_reject() {
 	rc=$?
 
 	problems=""
-	[ "$rc" -eq 1 ] || problems="$problems exit=$rc"
+	[ "$rc" -eq 3 ] || problems="$problems exit=$rc"
 	grep -q "input.snap-len" "$log" || problems="$problems no-error-message"
 	grep -q "$SNAP_CAP" "$log"      || problems="$problems no-bound-in-message"
 	grep -q "reached to the end of pcap file" "$log" \

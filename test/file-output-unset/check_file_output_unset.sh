@@ -86,7 +86,7 @@ expect_reject() {
 	rc=$?
 
 	problems=""
-	[ "$rc" -eq 1 ] || problems="$problems exit=$rc"
+	[ "$rc" -eq 3 ] || problems="$problems exit=$rc"
 	grep -qF "$key" "$log"   || problems="$problems no-error-for-$key"
 	grep -q "reached to the end of pcap file" "$log" \
 		&& problems="$problems ran-anyway"

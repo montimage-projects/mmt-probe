@@ -190,6 +190,38 @@ test-errno-signal: --check-dpi-folder $(ERRNO_SIGNAL_TEST_BIN)
 	$(QUIET) status=0; $(ERRNO_SIGNAL_TEST_BIN) || status=$$?; \
 		$(RM) $(ERRNO_SIGNAL_TEST_OBJDIR) $(ERRNO_SIGNAL_TEST_BIN); exit $$status
 
+# Repeated termination signal during shutdown (issue #45): a second
+# identical SIGINT/SIGTERM - a group-wide kill plus the monitor's
+# forward, or systemd's control-group KillMode the same way - used to
+# take the is_exiting branch and _exit(0), skipping the security drain,
+# the output fclose/.sem and the stdio flush. The child now treats a
+# repeat of the signal it is handling as a no-op while a different
+# second signal still exits immediately. The driver includes src/main.c
+# for the real handler and is built like test-errno-signal:
+# -ffunction-sections plus --gc-sections keep only the code the handler
+# reaches; pcap_capture_stop is stubbed there.
+DOUBLE_SIGNAL_TEST_DIR := $(TOP_DIR)/test/double-signal
+DOUBLE_SIGNAL_TEST_OBJDIR := $(DOUBLE_SIGNAL_TEST_DIR)/obj-asan
+DOUBLE_SIGNAL_TEST_BIN  := $(DOUBLE_SIGNAL_TEST_DIR)/double-signal-test
+DOUBLE_SIGNAL_TEST_SRCS := $(DOUBLE_SIGNAL_TEST_DIR)/double_signal_test.c
+DOUBLE_SIGNAL_TEST_OBJS := $(addprefix $(DOUBLE_SIGNAL_TEST_OBJDIR)/, \
+	$(addsuffix .o, $(basename $(notdir $(DOUBLE_SIGNAL_TEST_SRCS)))))
+
+$(DOUBLE_SIGNAL_TEST_OBJS): $(DOUBLE_SIGNAL_TEST_OBJDIR)/%.o: $(DOUBLE_SIGNAL_TEST_DIR)/%.c $(SRC_DIR)/main.c
+	@mkdir -p $(DOUBLE_SIGNAL_TEST_OBJDIR)
+	$(QUIET) $(CC) $(CFLAGS) -ffunction-sections -fsanitize=address -c -o $@ $<
+
+# $(CLDFLAGS) is not used here, for the same reason as test-errno-signal:
+# its -rdynamic would root the discarded call graph under --gc-sections
+$(DOUBLE_SIGNAL_TEST_BIN): $(DOUBLE_SIGNAL_TEST_OBJS)
+	$(QUIET) $(CC) -fsanitize=address -Wl,--gc-sections -o $@ $^ $(LIBS)
+
+.PHONY: test-double-signal
+test-double-signal: --check-dpi-folder $(DOUBLE_SIGNAL_TEST_BIN)
+	@echo "[TEST] repeated termination signal is a no-op while exiting"
+	$(QUIET) status=0; $(DOUBLE_SIGNAL_TEST_BIN) || status=$$?; \
+		$(RM) $(DOUBLE_SIGNAL_TEST_OBJDIR) $(DOUBLE_SIGNAL_TEST_BIN); exit $$status
+
 # Zero-length-key path of src/lib/hash.c (review #30/#31, note N3): an
 # occupied slot can legitimately hold {key_len = 0, key = NULL} - an empty
 # group-by makes mmt_memdup(msg, 0) return NULL - and hash_search must find
@@ -291,5 +323,5 @@ test-alert-delivery: compile
 	$(QUIET) sh $(TOP_DIR)/test/alert-delivery/check_alert_delivery.sh $(TOP_DIR)/$(APP)
 
 .PHONY: test
-test: test-stix test-report-overflow-stix test-snaplen test-crash test-report-overflow test-dynconf-reply test-online-signals test-errno-signal test-hash test-file-output-unset test-output-format test-sysreport-channel test-alert-delivery test-mqtt-output
+test: test-stix test-report-overflow-stix test-snaplen test-crash test-report-overflow test-dynconf-reply test-online-signals test-errno-signal test-double-signal test-hash test-file-output-unset test-output-format test-sysreport-channel test-alert-delivery test-mqtt-output
 	@:

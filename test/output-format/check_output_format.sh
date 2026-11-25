@@ -248,14 +248,15 @@ fi
 
 echo "[3] invalid values of output.format"
 for v in 0 1 2 XML csvx; do
-	expect_reject "X-invalid-$v" 1 \
+	expect_reject "X-invalid-$v" 3 \
 		"Unexpected value [$v] for [output.format]: expect $FORMAT_VALUES" \
 		CSV -X "output.format=$v"
 done
 #the configuration file refuses them too, with the parser's own error and
-# a clean exit 1 (issue #40: it used to die by abort(), status 134)
+# the do-not-restart status 3 (issue #40: it used to die by abort(),
+# status 134; issue #45: refusals now exit EXIT_STATUS_NO_RESTART)
 for v in 0 1 XML; do
-	expect_reject "conf-invalid-$v" 1 \
+	expect_reject "conf-invalid-$v" 3 \
 		"Invalid '$v' for option 'format'. Expect $FORMAT_VALUES." "$v"
 done
 
@@ -291,7 +292,7 @@ check_enum() {
 		bad "x-$param" "-x prints: $(grep "^$param " "$WORK_DIR/list/x")"
 	fi
 	expect_run "X-$param-$name" CSV -X "$param=$name"
-	expect_reject "X-$param-invalid" 1 \
+	expect_reject "X-$param-invalid" 3 \
 		"Unexpected value [1] for [$param]: expect $values" \
 		CSV -X "$param=1"
 }
