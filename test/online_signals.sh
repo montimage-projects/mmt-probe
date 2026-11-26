@@ -954,7 +954,7 @@ security {
 EOF
 	fi
 	#the inner run reports into /work (= $indir) for the host to check
-	if timeout -s KILL 120 docker run --rm --name "i45-dbsig-$$" \
+	if timeout -s KILL 120 docker run --rm --name "f57m-dbsig-$$" \
 		--memory 4g --memory-swap 4g --pids-limit 512 \
 		--user "$(id -u):$(id -g)" \
 		-v "$indir:/work" \
@@ -987,7 +987,7 @@ fi
 # container runs with --rm; a docker wait subscribed before the stop still
 # reports the exit code once the container is gone.
 if [ -n "$DOCKER_IMAGE" ] && command -v docker >/dev/null 2>&1 && docker info >/dev/null 2>&1; then
-	name="i710-stop-$$"
+	name="f57m-stop-$$"
 	if docker run -d --rm --name "$name" --cap-add NET_RAW \
 		-v "$ROOT:$ROOT:ro" --entrypoint "$ROOT/probe" \
 		"$DOCKER_IMAGE" -c "$ROOT/mmt-probe.conf" -i "$IFACE" \

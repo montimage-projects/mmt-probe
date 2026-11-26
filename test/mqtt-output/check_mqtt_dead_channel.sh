@@ -46,7 +46,7 @@ MQTT_IMAGE=${MQTT_IMAGE:-eclipse-mosquitto@sha256:21421af7b32bf9ce508e9090c8eb13
 SKIP_DOCKER=${SKIP_DOCKER:-0}
 #the run refuses to start a container while less memory is available
 FREE_MIN_GB=${FREE_MIN_GB:-8}
-CONTAINER_NAME="i53-mqtt-dead-channel-broker"
+CONTAINER_NAME="f57m-mqtt-dead-channel-broker"
 BROKER_PORT=18883
 BROKER_TTL=$((HOLD_SECONDS + BROKER_DELAY + 30))
 
