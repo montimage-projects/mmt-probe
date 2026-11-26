@@ -71,9 +71,10 @@ nb_fail=0
 nb_run=0
 nb_skip=0
 
-#a run that must be rejected: exit status 1 - a refused configuration
-# exits cleanly, never the 134 of the old abort() - print an error naming
-# the required 'section.key' option, and never crash nor process packets
+#a run that must be rejected: exit status 3 - a refused configuration
+# exits cleanly, never the 134 of the old abort() nor the old exit 1 -
+# print an error naming the required 'section.key' option, and never
+# crash nor process packets
 expect_reject() {
 	# $1: case name, $2: the 'section.key' the error must name;
 	# remaining arguments are passed to the probe

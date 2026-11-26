@@ -15,8 +15,9 @@
 #   - refused values: 'period = -1' and 'period = 70000' in the
 #     configuration file are rejected with an error naming
 #     'system-report.period'; '-X system-report.period=' of 0, -1, abc and
-#     70000 is rejected with a non-zero exit - the field is a uint16_t and
-#     a value that does not fit would wrap into a different cadence;
+#     70000 is rejected with the do-not-restart status 3 - the field is a
+#     uint16_t and a value that does not fit would wrap into a different
+#     cadence;
 #   - '-x' still lists the key with its type.
 #
 # On the unfixed code the cadence legs see only the hardcoded 5 s cadence
@@ -167,10 +168,11 @@ expect_cadence() {
 	pass "$name"
 }
 
-#a run that must be refused before any packet is read, with a clean exit
-# status 1, never a crash. $1: case name, $2: the 'period' line replacement
-# ('none' removes it), $3: extra probe arguments, $4: a message the log
-# must show
+#a run that must be refused before any packet is read, with the
+# do-not-restart status 3, never a crash (issue #45: a refused
+# configuration no longer exits 1). $1: case name, $2: the 'period' line
+# replacement ('none' removes it), $3: extra probe arguments, $4: a
+# message the log must show
 expect_reject() {
 	name=$1 period=$2 xarg=$3 want_msg=$4
 	conf=$(make_conf "$name" "$period")
@@ -184,8 +186,8 @@ expect_reject() {
 			> "$WORK_DIR/$name/log" 2>&1 || status=$?
 	fi
 
-	if [ "$status" -ne 1 ]; then
-		bad "$name" "exit status $status, expected 1"
+	if [ "$status" -ne 3 ]; then
+		bad "$name" "exit status $status, expected 3"
 		sed 's/^/      /' "$WORK_DIR/$name/log" | tail -5
 		return
 	fi

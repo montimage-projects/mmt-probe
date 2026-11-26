@@ -11,8 +11,9 @@
 #     spellings of one format write byte-identical reports; the CSV and
 #     JSON reports differ and the JSON one is JSON;
 #   - an invalid value (a number, an unknown name) is refused through -X
-#     with an error naming the accepted values and exit status 1, and in
-#     the configuration file with the parser's error and a non-zero exit;
+#     with an error naming the accepted values and the do-not-restart
+#     status 3, and in the configuration file with the parser's error and
+#     the same status;
 #   - -x lists output.format with its accepted values, -h names them;
 #   - the other enum-like options reachable through -X (input.mode,
 #     session-report.rtt-base, and socket-output.type and
