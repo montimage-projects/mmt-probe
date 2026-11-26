@@ -81,6 +81,16 @@ Edit `/opt/mmt/probe/mmt-probe.conf` to configure the service, then restart:
 sudo systemctl restart mmt-probe
 ```
 
+`RestartPreventExitStatus=3` in the unit matches the probe's
+do-not-restart exit status (`EXIT_STATUS_NO_RESTART` in
+`src/lib/limit.h`): a refused configuration - unreadable or invalid
+configuration file, a rejected `-X` override - exits 3, so the service
+stops instead of looping on a configuration that cannot work. A clean
+SIGINT/SIGTERM shutdown exits 0; a repeated termination signal during the
+shutdown does not cut the drain short (reports are still flushed and
+closed). A crash dies by its signal, so the unit's `Restart=on-failure`
+restarts the probe.
+
 ## DPDK Deployment
 
 For high-performance capture using DPDK:

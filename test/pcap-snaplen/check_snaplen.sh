@@ -29,13 +29,13 @@
 #     and resolves to the file's capped 262144, so the exact effective
 #     value is asserted;
 #   - out-of-range (262145), negative (-1) and non-numeric (abc) values
-#     must be rejected with a clear error and a non-zero exit, both via
-#     the -X override and via the configuration file;
+#     must be rejected with a clear error and the do-not-restart status
+#     3, both via the -X override and via the configuration file;
 #   - the same bound applies to dump-pcap.snap-len (issue #53): a bad
-#     value is refused with a non-zero exit, and on an ASan build the
-#     refusal path must not leave allocated members behind - each
-#     expect_reject run goes out under detect_leaks=1 and a LeakSanitizer
-#     report counts as a failure;
+#     value is refused with the do-not-restart status 3, and on an ASan
+#     build the refusal path must not leave allocated members behind -
+#     each expect_reject run goes out under detect_leaks=1 and a
+#     LeakSanitizer report counts as a failure;
 #   - online, the configured value must reach pcap_set_snaplen: a live
 #     capture on ONLINE_IFACE (default: lo) must log the configured value.
 #     Skipped when no interface can capture (e.g. no AF_PACKET capability
@@ -192,11 +192,12 @@ run_one() {
 expect_reject() {
 	# $1: case name; $2: the option key the error message must name; the
 	# remaining arguments are passed to the probe. A refused value must
-	# give a clear error naming the option and its bound, a clean non-zero
-	# exit - a refused configuration no longer dies by abort(), status
-	# 134, and its status is not pinned to 1 - and no capture run. The
-	# run always goes out under detect_leaks=1: a LeakSanitizer report on
-	# an ASan build means the refusal path left allocated members behind.
+	# give a clear error naming the option and its bound, the
+	# do-not-restart status 3 - a refused configuration no longer dies by
+	# abort(), status 134, nor exits 1 (issues #40, #45) - and no capture
+	# run. The run always goes out under detect_leaks=1: a LeakSanitizer
+	# report on an ASan build means the refusal path left allocated
+	# members behind.
 	name="reject-$1" key="$2"
 	shift 2
 	log="$WORK_DIR/$name.log"
@@ -207,7 +208,7 @@ expect_reject() {
 	rc=$?
 
 	problems=""
-	[ "$rc" -ne 0 ] || problems="$problems exit=0"
+	[ "$rc" -eq 3 ] || problems="$problems exit=$rc"
 	grep -q "$key" "$log"         || problems="$problems no-error-message"
 	grep -q "$SNAP_CAP" "$log"    || problems="$problems no-bound-in-message"
 	grep -q "reached to the end of pcap file" "$log" \
@@ -314,7 +315,8 @@ for threads in $THREAD_NBS; do
 done
 
 #out-of-range, negative and non-numeric values must be rejected with a
-# clear error and a non-zero exit, never silently wrapped into the field
+# clear error and the do-not-restart status 3, never silently wrapped
+# into the field
 for bad in 262145 -1 abc 4294967296; do
 	expect_reject "s$bad" input.snap-len -c "$CONF" -t "$WORK_DIR/small.pcap" \
 		-X input.snap-len="$bad" -X thread-nb=1

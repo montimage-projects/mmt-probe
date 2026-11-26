@@ -168,21 +168,22 @@ static inline probe_conf_t* _parse_options( int argc, char ** argv ) {
 	if( config_file ){
 		conf = conf_load_from_file( config_file );
 		if( conf == NULL )
-			//the parse error was already reported: exit 1, not a crash
-			exit( EXIT_FAILURE );
+			//the parse error was already reported: a refused configuration
+			// is the do-not-restart status, not a crash (#45)
+			exit( EXIT_STATUS_NO_RESTART );
 	}else{
 		// load ./mmt-probe.conf if it is existing
 		if( _is_file_exists( DEFAULT_CONFIG_FILE) ){
 			config_file = DEFAULT_CONFIG_FILE;
 			conf = conf_load_from_file( config_file );
 			if( conf == NULL )
-				exit( EXIT_FAILURE );
+				exit( EXIT_STATUS_NO_RESTART );
 		} else {
 			//try again to read config from /opt/mmt/probe/mmt-probe.conf
 			config_file = DEFAULT_CONFIG_FILE_OPT;
 			conf = conf_load_from_file( config_file );
 			if( conf == NULL )
-				exit( EXIT_FAILURE );
+				exit( EXIT_STATUS_NO_RESTART );
 		}
 	}
 
@@ -231,17 +232,20 @@ static inline probe_conf_t* _parse_options( int argc, char ** argv ) {
 				break;
 			case CONF_OVERRIDE__REFUSED: //value is incorrect
 				fprintf(stderr, "Unexpected parameter value %s\n", string_val );
-				exit( 1 );
+				//a refused option is a refused configuration: the
+				// do-not-restart status, not EXIT_FAILURE which
+				// mmt-probe.service would restart forever (#45)
+				exit( EXIT_STATUS_NO_RESTART );
 				break;
 			case CONF_OVERRIDE__NO_BLOCK:
 				//the precise error - naming the missing block - was already
 				// notified; a generic "Unexpected parameter value" would
 				// wrongly blame the value
-				exit( 1 );
+				exit( EXIT_STATUS_NO_RESTART );
 				break;
 			case CONF_OVERRIDE__UNKNOWN_IDENT:  //ident is incorrect
 				fprintf(stderr, "Unknown parameter identity %s\n", string_att );
-				exit( 1 );
+				exit( EXIT_STATUS_NO_RESTART );
 				break;
 			default: break;
 			}
@@ -250,8 +254,8 @@ static inline probe_conf_t* _parse_options( int argc, char ** argv ) {
 	}
 
 	if( conf_validate(conf) ){
-		//the error was already reported: exit 1, not a crash
-		exit( EXIT_FAILURE );
+		//the error was already reported: the do-not-restart status (#45)
+		exit( EXIT_STATUS_NO_RESTART );
 	}
 
 	return conf;
@@ -361,9 +365,6 @@ void signal_handler(int type) {
 	// _exit or die by the signal first.
 	int saved_errno = errno;
 
-	//remember signal type in order to restart its process
-	main_processing_signal = type;
-
 	probe_context_t *context = get_context();
 	if(  context->is_exiting ){
 		//a crash signal while shutting down is still a crash:
@@ -381,12 +382,28 @@ void signal_handler(int type) {
 				}
 				EXIT_BY_SIGNAL( first_crash_signal );
 			}
-		//a second termination signal asks to exit right now - e.g., a
-		// group-wide kill plus the monitor's forward - without touching the
+		//a second, different termination signal asks to exit right now -
+		// e.g., a Ctrl+C answered too slowly - without touching the
 		// logger, which the interrupted code may hold a lock of
-		_report_second_signal( type );
-		EXIT_NORMALLY();
+		if( type != main_processing_signal ){
+			_report_second_signal( type );
+			EXIT_NORMALLY();
+		}
+		//a repeat of the signal that armed the shutdown is a no-op: a
+		// group-wide Ctrl+C or systemctl stop (KillMode=control-group)
+		// reaches this process both directly and through the monitor's
+		// forward while the drain still runs - security teardown, the
+		// output fclose/.sem and the stdio flush must all still happen.
+		// A different second signal remains the hard exit; a stuck
+		// drain is bounded externally (e.g. systemd TimeoutStopSec or
+		// docker stop's SIGKILL) - the monitor has no timer of its
+		// own, it blocks in waitpid.
+		errno = saved_errno;
+		return;
 	}
+
+	//remember signal type in order to restart its process
+	main_processing_signal = type;
 
 	switch( type ){
 	case SIGINT:
@@ -589,7 +606,7 @@ static int _main_processing( int argc, char** argv ){
 	if( context->config->reports.security != NULL
 			&& !stix_format_set_priority( context->config->reports.security->stix_priority ) ){
 		log_write( LOG_ERR, "Cannot parse security.stix-priority! Exiting!" );
-		return EXIT_FAILURE;
+		return EXIT_STATUS_NO_RESTART;
 	}
 #endif
 
@@ -599,7 +616,7 @@ static int _main_processing( int argc, char** argv ){
 
 	if( !_init_protocol_stack( context->config->stack_type, context->config->stack_offset )  ){
 		log_write( LOG_ERR, "Cannot initialize stack-type=%d! Exiting!", context->config->stack_type );
-		return EXIT_FAILURE;
+		return EXIT_STATUS_NO_RESTART;
 	}
 
 	//other stubs, such as, system usage report
@@ -895,7 +912,9 @@ int main( int argc, char** argv ){
 	//DPI initialization
 	if( !init_extraction() ) { // general ixE initialization
 		log_write( LOG_ERR, "MMT Extraction engine initialization error! Exiting!");
-		return EXIT_FAILURE;
+		//a start-up failure a restart would not fix: the do-not-restart
+		// status (#45)
+		return EXIT_STATUS_NO_RESTART;
 	}
 
 	//read configuration from file and execution parameters
@@ -908,7 +927,7 @@ int main( int argc, char** argv ){
 	context->is_exiting = false;
 	context->config = _parse_options(argc, argv);
 	if( conf_validate( context->config ) > 0 )
-		return EXIT_FAILURE;
+		return EXIT_STATUS_NO_RESTART;
 
 	int processing_ret = EXIT_SUCCESS;
 #ifdef DEBUG_MODE

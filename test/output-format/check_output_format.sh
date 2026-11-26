@@ -11,8 +11,9 @@
 #     spellings of one format write byte-identical reports; the CSV and
 #     JSON reports differ and the JSON one is JSON;
 #   - an invalid value (a number, an unknown name) is refused through -X
-#     with an error naming the accepted values and exit status 1, and in
-#     the configuration file with the parser's error and a non-zero exit;
+#     with an error naming the accepted values and the do-not-restart
+#     status 3, and in the configuration file with the parser's error and
+#     the same status;
 #   - -x lists output.format with its accepted values, -h names them;
 #   - the other enum-like options reachable through -X (input.mode,
 #     session-report.rtt-base, and socket-output.type and
@@ -248,14 +249,15 @@ fi
 
 echo "[3] invalid values of output.format"
 for v in 0 1 2 XML csvx; do
-	expect_reject "X-invalid-$v" 1 \
+	expect_reject "X-invalid-$v" 3 \
 		"Unexpected value [$v] for [output.format]: expect $FORMAT_VALUES" \
 		CSV -X "output.format=$v"
 done
 #the configuration file refuses them too, with the parser's own error and
-# a clean exit 1 (issue #40: it used to die by abort(), status 134)
+# the do-not-restart status 3 (issue #40: it used to die by abort(),
+# status 134; issue #45: refusals now exit EXIT_STATUS_NO_RESTART)
 for v in 0 1 XML; do
-	expect_reject "conf-invalid-$v" 1 \
+	expect_reject "conf-invalid-$v" 3 \
 		"Invalid '$v' for option 'format'. Expect $FORMAT_VALUES." "$v"
 done
 
@@ -291,7 +293,7 @@ check_enum() {
 		bad "x-$param" "-x prints: $(grep "^$param " "$WORK_DIR/list/x")"
 	fi
 	expect_run "X-$param-$name" CSV -X "$param=$name"
-	expect_reject "X-$param-invalid" 1 \
+	expect_reject "X-$param-invalid" 3 \
 		"Unexpected value [1] for [$param]: expect $values" \
 		CSV -X "$param=1"
 }

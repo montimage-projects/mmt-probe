@@ -78,6 +78,40 @@ graph TD
 5. **Report Generation** -- Session reports, event reports, and security alerts are generated
 6. **Output Channels** -- Reports are written to one or more configured output channels
 
+## Shutdown and exit statuses
+
+SIGINT and SIGTERM stop the probe gracefully: the processing child breaks
+its capture loop, then drains - workers flush their sessions, the
+security engine is unregistered, output files are flushed and closed
+(each sampled file gets its `.sem` marker) and the final statistics are
+logged. A repeat of the signal that armed the shutdown is a no-op: a
+group-wide Ctrl+C or `systemctl stop` (`KillMode=control-group`) reaches
+the child both directly and through the monitor's forward, and neither
+repeat is allowed to cut the drain short. A *different* second signal
+(e.g., SIGTERM while handling SIGINT) remains the hard exit: it exits
+the child immediately. The monitor has no grace timer of its own - it
+blocks in `waitpid` while the child drains - so a stuck drain is
+bounded externally, e.g. by systemd `TimeoutStopSec` or the SIGKILL of
+`docker stop`.
+
+The processing child reports its fate to the monitor through its exit
+status:
+
+| Child exit status | Meaning | Monitor reaction |
+|-------------------|---------|------------------|
+| 0 | clean shutdown (SIGINT/SIGTERM handled) | stops the probe, exits 0 |
+| 1 (`EXIT_TOBE_RESTARTED`) | crash or restart request | recreates the child |
+| 3 (`EXIT_STATUS_NO_RESTART`) | start-up/configuration refusal | stops the whole probe, exits 3 |
+| death by SIGINT/SIGTERM | the shutdown that was asked for | exits 0 |
+| death by another signal | crash | recreates the child |
+
+Refused configurations - an unreadable or invalid configuration file, a
+rejected `-X` override, a failed `conf_validate` - always report status
+3, matching `RestartPreventExitStatus=3` in the shipped
+`mmt-probe.service`: the service stops instead of restarting forever on a
+configuration that cannot work. Real crashes still die by their signal
+(139 for SIGSEGV, 134 for SIGABRT as seen from a shell).
+
 ## Module Architecture
 
 MMT-Probe uses a modular build system. Modules are compiled conditionally based on build flags:

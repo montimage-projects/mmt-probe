@@ -64,7 +64,7 @@ DPDK uses CPU cycle counters (`rte_rdtsc`) for timestamping. Accuracy depends on
 | `EAL: No available hugepages` | Configure hugepages: `echo 1024 > /sys/kernel/mm/hugepages/hugepages-2048kB/nr_hugepages` |
 | `EAL: Cannot open PCI device` | Bind NIC to DPDK driver: `dpdk-devbind.py --bind=vfio-pci <pci-address>` |
 | DPDK init fails silently | Check `RTE_SDK` and `RTE_TARGET` environment variables are correctly set |
-| Probe exits on init error | MMT-Probe exits cleanly on DPDK errors so the monitor process does not restart in a loop |
+| Probe exits on init error | MMT-Probe exits cleanly (status 0) on DPDK init errors, so the monitor does not restart it |
 
 ## See Also
 
