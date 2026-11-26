@@ -292,6 +292,19 @@ test-mqtt-output: compile
 	@echo "[TEST] mqtt-only output enable"
 	$(QUIET) sh $(TOP_DIR)/test/mqtt-output/check_mqtt_output.sh $(TOP_DIR)/$(APP)
 
+# MQTT on a dead channel (issue #53, review F2): once the init connect
+# failed, mqtt_output_send() dropped every report silently and never
+# retried. The check feeds the pcap through a FIFO held open while
+# system-report ticks one report every 5 seconds onto the mqtt+stdout
+# channels: with no broker at all the drops must be counted, warned about
+# once per interval and retried; with a broker container coming up after
+# the probe, the periodic retry must connect and deliver. Both legs need
+# an MQTT_MODULE build (they skip otherwise), the second one needs docker.
+.PHONY: test-mqtt-dead-channel
+test-mqtt-dead-channel: compile
+	@echo "[TEST] mqtt dead channel"
+	$(QUIET) sh $(TOP_DIR)/test/mqtt-output/check_mqtt_dead_channel.sh $(TOP_DIR)/$(APP)
+
 # system-report.output-channel (issue #43): declared CHAR_STAR over an
 # output_channel_conf_t field, so a -X override freed and cloned a string
 # into the enum and died by SIGSEGV. Declared LIST like the other
@@ -306,6 +319,19 @@ test-mqtt-output: compile
 test-sysreport-channel: compile
 	@echo "[TEST] system-report.output-channel -X values"
 	$(QUIET) sh $(TOP_DIR)/test/sysreport-channel/check_sysreport_channel.sh $(TOP_DIR)/$(APP)
+
+# system-report.period (issue #49): the value was parsed but the
+# system-stats routine fired on a hardcoded 5 s. A configured period must
+# change the cadence of the type-201 report, an unset/0 period keeps the
+# 5 s default, and out-of-range values - negative, wider than the uint16_t
+# field, or 0 through -X - are refused. The legs feed the pcap through a
+# FIFO held open so the routine fires before the stream ends. The compile
+# prerequisite keeps a parallel `make -j test` on a clean tree from racing
+# the build.
+.PHONY: test-sysreport-period
+test-sysreport-period: compile
+	@echo "[TEST] system-report.period cadence and values"
+	$(QUIET) sh $(TOP_DIR)/test/sysreport-period/check_sysreport_period.sh $(TOP_DIR)/$(APP)
 
 # End-of-capture alert delivery (issue #38): every alert MMT-Security raises
 # during an offline capture must be written before the probe exits, on every
@@ -337,5 +363,5 @@ test-uninit-timer: compile
 	$(QUIET) sh $(TOP_DIR)/test/uninit-timer/check_uninit_timer.sh $(TOP_DIR)/$(APP)
 
 .PHONY: test
-test: test-stix test-report-overflow-stix test-snaplen test-crash test-report-overflow test-dynconf-reply test-online-signals test-errno-signal test-double-signal test-hash test-file-output-unset test-output-format test-sysreport-channel test-alert-delivery test-mqtt-output test-uninit-timer
+test: test-stix test-report-overflow-stix test-snaplen test-crash test-report-overflow test-dynconf-reply test-online-signals test-errno-signal test-double-signal test-hash test-file-output-unset test-output-format test-sysreport-channel test-sysreport-period test-alert-delivery test-mqtt-output test-mqtt-dead-channel test-uninit-timer
 	@:
